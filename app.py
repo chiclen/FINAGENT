@@ -11,7 +11,6 @@ import subprocess
 import os
 import pytz  # For US timezone
 import sys  # For sys.executable
-from streamlit_extras.switch_page_button import switch_page
 
 # Database setup
 DB_FILE = 'stocks.db'
