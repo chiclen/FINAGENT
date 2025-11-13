@@ -20,7 +20,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.9'  # Adjust if your script requires a specific version
+        python-version: '3.9'
 
     # Step 3: Install dependencies
     - name: Install dependencies
@@ -38,13 +38,22 @@ jobs:
     - name: Run Python script
       run: python DataFeedFromYahoo.py
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # For Git push authentication
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    # Step 6: Commit and push changes to stocks.db
+    # Step 6: Upload stocks.db as an artifact
+    - name: Upload stocks.db artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: stocks-db
+        path: stocks.db
+        retention-days: 7  # Keep artifacts for 7 days (adjust as needed)
+
+    # Step 7: Commit and push changes
     - name: Commit and push changes
       run: |
         git add stocks.db
         git commit -m "Update stocks.db at $(date -u)" || echo "No changes to commit"
+        git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git
         git push origin main
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
