@@ -15,6 +15,8 @@ jobs:
     # Step 1: Check out the repository code
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch all history to ensure we can push
 
     # Step 2: Set up Python environment
     - name: Set up Python
@@ -46,14 +48,14 @@ jobs:
       with:
         name: stocks-db
         path: stocks.db
-        retention-days: 7  # Keep artifacts for 7 days (adjust as needed)
+        retention-days: 7  # Keep artifacts for 7 days
 
     # Step 7: Commit and push changes
     - name: Commit and push changes
       run: |
         git add stocks.db
         git commit -m "Update stocks.db at $(date -u)" || echo "No changes to commit"
-        git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git
-        git push origin main
+        git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/chiclen/FINAGENT.git
+        git push origin main || echo "No changes to push or push failed"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
