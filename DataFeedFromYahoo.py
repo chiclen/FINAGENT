@@ -12,6 +12,8 @@ from pathlib import Path
 import numpy as np  # For np.isnan
 import json
 
+api_key = os.environ.get('API_KEY')
+
 # Suppress warnings
 warnings.filterwarnings('ignore', category=UserWarning)
 
