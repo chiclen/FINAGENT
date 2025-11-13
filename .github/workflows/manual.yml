@@ -1,0 +1,50 @@
+name: Run DataFeedFromYahoo
+
+on:
+  schedule:
+    - cron: '30 13 * * *'  # 13:30 GMT
+    - cron: '30 14 * * *'  # 14:30 GMT
+    - cron: '0 16 * * *'   # 16:00 GMT
+  workflow_dispatch:      # Allows manual triggering
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Step 1: Check out the repository code
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # Step 2: Set up Python environment
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'  # Adjust if your script requires a specific version
+
+    # Step 3: Install dependencies
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    # Step 4: Set up Git credentials
+    - name: Configure Git
+      run: |
+        git config --global user.name "GitHub Action"
+        git config --global user.email "action@github.com"
+
+    # Step 5: Run the Python script
+    - name: Run Python script
+      run: python DataFeedFromYahoo.py
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # For Git push authentication
+
+    # Step 6: Commit and push changes to stocks.db
+    - name: Commit and push changes
+      run: |
+        git add stocks.db
+        git commit -m "Update stocks.db at $(date -u)" || echo "No changes to commit"
+        git push origin main
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
