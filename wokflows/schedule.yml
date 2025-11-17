@@ -28,7 +28,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        if [ -f datafeedrequirements.txt ]; then pip install -r datafeedrequirements.txt; fi
+        if [ -f datafeedRequirement.txt ]; then pip install -r datafeedRequirement.txt; fi
 
     # Step 4: Set up Git credentials
     - name: Configure Git
