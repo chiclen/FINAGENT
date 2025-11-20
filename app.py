@@ -362,7 +362,7 @@ def fetch_company_info(symbol):
             return pd.DataFrame([company_data])
         return None
     except Exception as e:
-        st.warning(f"Failed to fetch company info for {symbol}: {e}")
+        st.error(f"Failed to fetch company info for {symbol}: {e}")
         return None
 
 def main():
@@ -395,26 +395,12 @@ def main():
         </style>
     """, unsafe_allow_html=True)
 
-    # Initialize session state
-    if 'selected_symbol' not in st.session_state:
-        st.session_state.selected_symbol = None
-    if 'running' not in st.session_state:
-        st.session_state.running = False
-    if 'logs' not in st.session_state:
-        st.session_state.logs = []
-
+    st.session_state.selected_symbol = ""
     # Layout
     st.title("Stock Analyzer")
     col_refresh, col_info = st.columns([1, 3])
     with col_refresh:
         script_path = "DataFeedFromYahoo.py"
-
-    # Progress and Log Display (only if not running; handled inline during run)
-    if st.session_state.logs:
-        st.subheader("System Logs")
-        st.text_area("DataFeed Output:", value="\n".join(st.session_state.logs), height=200, disabled=True)
-    else:
-        st.info("No logs yet. Click 'Download Data from yahoo' to start.")
 
     # Load data
     df = load_stocks_data()
@@ -451,132 +437,124 @@ def main():
     # Get latest update time
     latest_time = get_latest_update_time()
 
-    col1, col2 = st.columns([1, 2], gap="small")
-    with col1:
-        # Sidebar for filters (disabled during run)
-        st.sidebar.header("Filters")
-        threshold = st.sidebar.slider(
-            "Closeness Threshold (%)", 0.0, 30.0, 10.0,
-            disabled=st.session_state.running
-        )
-        cap_filter = st.sidebar.multiselect(
-            "Filter by Market Cap",
-            options=sorted(df['category'].unique()) if 'category' in df.columns else [],
-            disabled=st.session_state.running
-        )
-        view_type = st.sidebar.radio(
-            "View Mode", ["Close to High", "Close to Low", "Both"],
-            disabled=st.session_state.running
-        )
+    # Sidebar for filters (disabled during run)
+    st.sidebar.header("Filters")
+    threshold = st.sidebar.slider(
+        "Closeness Threshold (%)", 0.0, 30.0, 10.0,
+        disabled=False
+    )
+    cap_filter = st.sidebar.multiselect(
+        "Filter by Market Cap",
+        options=sorted(df['category'].unique()) if 'category' in df.columns else [],
+        disabled=False
+    )
+    view_type = st.sidebar.radio(
+        "View Mode", ["Close to High", "Close to Low", "Both"],
+        disabled=False
+    )
 
-        # Stock Info Table
-        filtered_df = df[df['category'].isin(cap_filter)] if cap_filter else df
-        if filtered_df.empty:
-            st.warning(f"No stocks match the selected market caps: {', '.join(cap_filter)}")
-            return
-        if not st.session_state.running:
-            for cap in sorted(cap_filter):
-                cap_df = filtered_df[filtered_df['category'] == cap]
-                if cap_df.empty:
-                    st.info(f"No {cap} stocks available.")
-                    continue
-                if view_type == "Close to High":
-                    close_to_high = cap_df[cap_df['dist_to_high_pct'] <= threshold].copy()
-                    close_to_high = close_to_high.sort_values('dist_to_high_pct')
-                    if not close_to_high.empty:
-                        st.subheader(f"{cap} Stocks Close to 52-Week High ({latest_time})")
-                        st.subheader(f"(≤ {threshold}%)")
-                        display_columns = ['symbol', 'current_price', 'week_high_52', 'dist_to_high_pct', 'company_name']
-                        selected_row = st.dataframe(
-                            close_to_high[display_columns],
-                            column_config={k: v for k, v in column_config.items() if k in display_columns},
-                            key=f"high_{cap}",
-                            on_select="rerun",
-                            selection_mode="single-row",
-                            hide_index=True
-                        )
-                        if selected_row.selection.rows:
-                            st.session_state.selected_symbol = close_to_high.iloc[selected_row.selection.rows[0]]['symbol']
-                elif view_type == "Close to Low":
-                    close_to_low = cap_df[cap_df['dist_to_low_pct'] <= threshold].copy()
-                    close_to_low = close_to_low.sort_values('dist_to_low_pct')
-                    if not close_to_low.empty:
-                        st.subheader(f"{cap} Stocks Close to 52-Week Low ({latest_time})")
-                        st.subheader(f"(≤ {threshold}%)")
-                        display_columns = ['symbol', 'current_price', 'week_low_52', 'dist_to_low_pct', 'company_name']
-                        selected_row = st.dataframe(
-                            close_to_low[display_columns],
-                            column_config={k: v for k, v in column_config.items() if k in display_columns},
-                            key=f"low_{cap}",
-                            on_select="rerun",
-                            selection_mode="single-row",
-                            hide_index=True
-                        )
-                        if selected_row.selection.rows:
-                            st.session_state.selected_symbol = close_to_low.iloc[selected_row.selection.rows[0]]['symbol']
-                else:  # Both
-                    close_to_high = cap_df[cap_df['dist_to_high_pct'] <= threshold].copy()
-                    close_to_low = cap_df[cap_df['dist_to_low_pct'] <= threshold].copy()
-                    if not close_to_high.empty:
-                        st.subheader(f"{cap} Stocks Close to 52-Week High ({latest_time})")
-                        st.subheader(f"(≤ {threshold}%)")
-                        display_columns = ['symbol', 'current_price', 'week_high_52', 'dist_to_high_pct', 'company_name']
-                        selected_row = st.dataframe(
-                            close_to_high[display_columns],
-                            column_config={k: v for k, v in column_config.items() if k in display_columns},
-                            key=f"high_{cap}",
-                            on_select="rerun",
-                            selection_mode="single-row",
-                            hide_index=True
-                        )
-                        if selected_row.selection.rows:
-                            st.session_state.selected_symbol = close_to_high.iloc[selected_row.selection.rows[0]]['symbol']
-                    if not close_to_low.empty:
-                        st.subheader(f"{cap} Stocks Close to 52-Week Low ({latest_time})")
-                        st.subheader(f"(≤ {threshold}%)")
-                        display_columns = ['symbol', 'current_price', 'week_low_52', 'dist_to_low_pct', 'company_name']
-                        selected_row = st.dataframe(
-                            close_to_low[display_columns],
-                            column_config={k: v for k, v in column_config.items() if k in display_columns},
-                            key=f"low_{cap}",
-                            on_select="rerun",
-                            selection_mode="single-row",
-                            hide_index=True
-                        )
-                        if selected_row.selection.rows:
-                            st.session_state.selected_symbol = close_to_low.iloc[selected_row.selection.rows[0]]['symbol']
+    # Stock Info Table
+    filtered_df = df[df['category'].isin(cap_filter)] if cap_filter else df
+    if filtered_df.empty:
+        st.warning(f"No stocks match the selected market caps: {', '.join(cap_filter)}")
+        return
+
+    for cap in sorted(cap_filter):
+        cap_df = filtered_df[filtered_df['category'] == cap]
+        if cap_df.empty:
+            st.info(f"No {cap} stocks available.")
+            continue
+        if view_type == "Close to High":
+            close_to_high = cap_df[cap_df['dist_to_high_pct'] <= threshold].copy()
+            close_to_high = close_to_high.sort_values('dist_to_high_pct')
+            if not close_to_high.empty:
+                st.subheader(f"{cap} Stocks Close to 52-Week High ({latest_time})")
+                st.subheader(f"(≤ {threshold}%)")
+                display_columns = ['symbol', 'current_price', 'week_high_52', 'dist_to_high_pct', 'company_name']
+                selected_row = st.dataframe(
+                    close_to_high[display_columns],
+                    column_config={k: v for k, v in column_config.items() if k in display_columns},
+                    key=f"high_{cap}",
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    hide_index=True
+                )
+                if selected_row.selection.rows:
+                    st.session_state.selected_symbol = close_to_high.iloc[selected_row.selection.rows[0]]['symbol']
+        elif view_type == "Close to Low":
+            close_to_low = cap_df[cap_df['dist_to_low_pct'] <= threshold].copy()
+            close_to_low = close_to_low.sort_values('dist_to_low_pct')
+            if not close_to_low.empty:
+                st.subheader(f"{cap} Stocks Close to 52-Week Low ({latest_time})")
+                st.subheader(f"(≤ {threshold}%)")
+                display_columns = ['symbol', 'current_price', 'week_low_52', 'dist_to_low_pct', 'company_name']
+                selected_row = st.dataframe(
+                    close_to_low[display_columns],
+                    column_config={k: v for k, v in column_config.items() if k in display_columns},
+                    key=f"low_{cap}",
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    hide_index=True
+                )
+                if selected_row.selection.rows:
+                    st.session_state.selected_symbol = close_to_low.iloc[selected_row.selection.rows[0]]['symbol']
+        else:  # Both
+            close_to_high = cap_df[cap_df['dist_to_high_pct'] <= threshold].copy()
+            close_to_low = cap_df[cap_df['dist_to_low_pct'] <= threshold].copy()
+            if not close_to_high.empty:
+                st.subheader(f"{cap} Stocks Close to 52-Week High ({latest_time})")
+                st.subheader(f"(≤ {threshold}%)")
+                display_columns = ['symbol', 'current_price', 'week_high_52', 'dist_to_high_pct', 'company_name']
+                selected_row = st.dataframe(
+                    close_to_high[display_columns],
+                    column_config={k: v for k, v in column_config.items() if k in display_columns},
+                    key=f"high_{cap}",
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    hide_index=True
+                )
+                if selected_row.selection.rows:
+                    st.session_state.selected_symbol = close_to_high.iloc[selected_row.selection.rows[0]]['symbol']
+            if not close_to_low.empty:
+                st.subheader(f"{cap} Stocks Close to 52-Week Low ({latest_time})")
+                st.subheader(f"(≤ {threshold}%)")
+                display_columns = ['symbol', 'current_price', 'week_low_52', 'dist_to_low_pct', 'company_name']
+                selected_row = st.dataframe(
+                    close_to_low[display_columns],
+                    column_config={k: v for k, v in column_config.items() if k in display_columns},
+                    key=f"low_{cap}",
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    hide_index=True
+                )
+                if selected_row.selection.rows:
+                    st.session_state.selected_symbol = close_to_low.iloc[selected_row.selection.rows[0]]['symbol']
+ 
+    tabs = st.tabs(["Chart", "News", "Company Info"])
+    with tabs[0]:
+        if (st.session_state.selected_symbol!=""):
+            st.subheader(f"5-Year Chart for {st.session_state.selected_symbol}")
+        fig = fetch_stock_chart(st.session_state.selected_symbol)
+        if fig:
+            st.plotly_chart(fig, width="stretch")
         else:
-            st.info("Loading... Tables disabled.")
-    with col2:
-        if st.session_state.selected_symbol and not st.session_state.running:
-            tabs = st.tabs(["Chart", "News", "Company Info"])
-            with tabs[0]:
-                st.subheader(f"5-Year Chart for {st.session_state.selected_symbol}")
-                fig = fetch_stock_chart(st.session_state.selected_symbol)
-                if fig:
-                    st.plotly_chart(fig, width="stretch")
-                else:
-                    st.error(f"No chart data available for {st.session_state.selected_symbol}.")
-            with tabs[1]:
-                st.subheader(f"News for {st.session_state.selected_symbol}")
-                df2 = fetch_news(st.session_state.selected_symbol)
-                if df2 is not None and not df2.empty:
-                    st.markdown(df2.to_html(escape=False, index=False, classes="news-table"), unsafe_allow_html=True)
-                else:
-                    st.warning("No news data available.")
-            with tabs[2]:
-                st.subheader(f"Company Info for {st.session_state.selected_symbol}")
-                df_company = fetch_company_info(st.session_state.selected_symbol)
-                if df_company is not None and not df_company.empty:
-                    st.markdown(df_company[["Name", "Symbol", "Sector", "Industry", "Market Cap", "Website"]].to_html(escape=False, index=False, classes="company-table"), unsafe_allow_html=True)
-                    st.markdown("**Description**:")
-                    st.write(df_company["Description"].iloc[0])
-                else:
-                    st.warning("No company info available.")
-        elif st.session_state.running:
-            st.info("Select a stock after loading completes.")
+            st.error(f"No chart data available for {st.session_state.selected_symbol}.")
+    with tabs[1]:
+        st.subheader(f"News for {st.session_state.selected_symbol}")
+        df2 = fetch_news(st.session_state.selected_symbol)
+        if df2 is not None and not df2.empty:
+            st.markdown(df2.to_html(escape=False, index=False, classes="news-table"), unsafe_allow_html=True)
         else:
-            st.info("Select a stock from the table to view its chart, news and company info.")
+            st.warning("No news data available.")
+    with tabs[2]:
+        st.subheader(f"Company Info for {st.session_state.selected_symbol}")
+        df_company = fetch_company_info(st.session_state.selected_symbol)
+        if df_company is not None and not df_company.empty:
+            st.markdown(df_company[["Name", "Symbol", "Sector", "Industry", "Market Cap", "Website"]].to_html(escape=False, index=False, classes="company-table"), unsafe_allow_html=True)
+            st.markdown("**Description**:")
+            st.write(df_company["Description"].iloc[0])
+        else:
+            st.warning("No company info available.")
 
 if __name__ == "__main__":
     main()
