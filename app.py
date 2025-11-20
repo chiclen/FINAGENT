@@ -88,6 +88,8 @@ def load_stocks_data():
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour due to yfinance rate limits
 def fetch_news(symbol):
+    if (symbol==""): 
+        return None
     try:
         time.sleep(1)  # Avoid rate limits
         stock = yf.Ticker(symbol.upper())
@@ -346,6 +348,8 @@ def fetch_stock_chart(symbol):
 
 @st.cache_data(ttl=7200)
 def fetch_company_info(symbol):
+    if (symbol== ""):
+        return None
     try:
         stock = yf.Ticker(symbol.upper())
         info = stock.info
@@ -367,37 +371,10 @@ def fetch_company_info(symbol):
 
 def main():
     # Add CSS for minimizing symbol column and button visibility
-    st.markdown("""
-        <style>
-        .stDataFrame table th:first-child,
-        .stDataFrame table td:first-child {
-            width: 40px !important;
-            min-width: 40px !important;
-            max-width: 40px !important;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        @media (max-width: 768px) {
-            .stDataFrame table th:first-child,
-            .stDataFrame table td:first-child {
-                width: 40px !important;
-                min-width: 40px !important;
-                max-width: 40px !important;
-                font-size: 12px;
-            }
-        }
-        button {
-            display: block !important;
-            width: 100% !important;
-            visibility: visible !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
 
     st.session_state.selected_symbol = ""
     # Layout
-    st.title("Stock Analyzer")
+    st.subheader("Stock Analyzer")
     col_refresh, col_info = st.columns([1, 3])
     with col_refresh:
         script_path = "DataFeedFromYahoo.py"
@@ -534,22 +511,22 @@ def main():
     with tabs[0]:
         if (st.session_state.selected_symbol!=""):
             st.subheader(f"5-Year Chart for {st.session_state.selected_symbol}")
-        fig = fetch_stock_chart(st.session_state.selected_symbol)
-        if fig:
-            st.plotly_chart(fig, width="stretch")
+            fig = fetch_stock_chart(st.session_state.selected_symbol)
+            if fig:
+                st.plotly_chart(fig, width="stretch")
         else:
-            st.error(f"No chart data available for {st.session_state.selected_symbol}.")
-    with tabs[1]:
-        st.subheader(f"News for {st.session_state.selected_symbol}")
+            st.warning(f"No chart data available for {st.session_state.selected_symbol}.")
+    with tabs[1]:    
         df2 = fetch_news(st.session_state.selected_symbol)
         if df2 is not None and not df2.empty:
+            st.subheader(f"News for {st.session_state.selected_symbol}")
             st.markdown(df2.to_html(escape=False, index=False, classes="news-table"), unsafe_allow_html=True)
         else:
             st.warning("No news data available.")
-    with tabs[2]:
-        st.subheader(f"Company Info for {st.session_state.selected_symbol}")
+    with tabs[2]:     
         df_company = fetch_company_info(st.session_state.selected_symbol)
         if df_company is not None and not df_company.empty:
+            st.subheader(f"Company Info for {st.session_state.selected_symbol}")
             st.markdown(df_company[["Name", "Symbol", "Sector", "Industry", "Market Cap", "Website"]].to_html(escape=False, index=False, classes="company-table"), unsafe_allow_html=True)
             st.markdown("**Description**:")
             st.write(df_company["Description"].iloc[0])
