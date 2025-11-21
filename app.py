@@ -143,11 +143,12 @@ def fetch_news(symbol):
     except Exception as e:
         return None
 
-def fetch_stock_chart(symbol):
+
+def fetch_stock_chart(symbol, period1, interval1):
     """Fetch 5-year historical data and create a responsive candlestick chart with MA5, MA20, MA50, volume, RSI, MACD, Bollinger Bands, and squeeze signals."""
     try:
         ticker = yf.Ticker(symbol)
-        df = ticker.history(period="5y", interval="1d")
+        df = ticker.history(period=period1, interval=interval1)
         if df.empty:
             st.error(f"No historical data returned for {symbol}.")
             return None
@@ -346,6 +347,7 @@ def fetch_stock_chart(symbol):
         st.error(f"Failed to fetch or process chart for {symbol}: {e}")
         return None
 
+        
 @st.cache_data(ttl=7200)
 def fetch_company_info(symbol):
     if (symbol== ""):
@@ -509,13 +511,57 @@ def main():
  
     tabs = st.tabs(["Chart", "News", "Company Info"])
     with tabs[0]:
-        if (st.session_state.selected_symbol!=""):
-            st.subheader(f"5-Year Chart for {st.session_state.selected_symbol}")
-            fig = fetch_stock_chart(st.session_state.selected_symbol)
+        if st.session_state.selected_symbol:
+            sym = st.session_state.selected_symbol
+
+            # === NEW: Dropdown for time period ===
+            period_options = [
+                "15 Minutes",
+                "30 Minutes",
+                "3 Months",
+                "6 Months",
+                "1 Year",
+                "5 Years",
+                "10 Years",
+                "All Available"
+            ]
+
+            # Map user-friendly names to yfinance parameters
+            period_map = {
+                "15 Minutes": ("1d", "15m"),
+                "30 Minutes": ("1d", "30m"),
+                "3 Months": ("3mo", "1d"),
+                "6 Months": ("6mo", "1d"),
+                "1 Year": ("1y", "1d"),
+                "5 Years": ("5y", "1d"),
+                "10 Years": ("10y", "1d"),
+                "All Available": ("max", "1mo")  # "max" with monthly for very long history
+            }
+            
+            # Remember user's last choice
+            if 'chart_period' not in st.session_state:
+                st.session_state.chart_period = "5 Years"
+
+            selected_period = st.selectbox(
+                "Chart Timeframe",
+                options=period_options,
+                index=period_options.index(st.session_state.chart_period),
+                key="period_selector"
+            )
+
+            selected_period, selected_interval = period_map.get(selected_period)
+
+            # Update session state
+            # === Generate chart with selected period ===
+            fig = fetch_stock_chart(sym, selected_period, selected_interval)
+
             if fig:
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("No chart data available for this timeframe.")
         else:
-            st.warning(f"No chart data available for {st.session_state.selected_symbol}.")
+            st.info("Select a stock to view its chart.")
+    
     with tabs[1]:    
         df2 = fetch_news(st.session_state.selected_symbol)
         if df2 is not None and not df2.empty:
