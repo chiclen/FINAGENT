@@ -149,214 +149,154 @@ def fetch_news(symbol):
         return None
     except Exception as e:
         return None
-
-
+    
 def fetch_stock_chart(symbol, period1, interval1):
-    """Fetch 5-year historical data and create a responsive candlestick chart with MA5, MA20, MA50, volume, RSI, MACD, Bollinger Bands, and squeeze signals."""
     try:
         ticker = yf.Ticker(symbol)
         df = ticker.history(period=period1, interval=interval1)
         if df.empty:
             st.error(f"No historical data returned for {symbol}.")
             return None
-        
-        # Calculate moving averages
-        df['MA5'] = df['Close'].rolling(window=5).mean()
-        df['MA20'] = df['Close'].rolling(window=20).mean()
-        df['MA50'] = df['Close'].rolling(window=50).mean()
-        
-        # Bollinger Bands (20-period SMA with 2 std devs)
-        df['BB_Mid'] = df['Close'].rolling(window=20).mean()
-        df['BB_Std'] = df['Close'].rolling(window=20).std()
-        df['BB_Upper'] = df['BB_Mid'] + (df['BB_Std'] * 2)
-        df['BB_Lower'] = df['BB_Mid'] - (df['BB_Std'] * 2)
-        
-        # Bollinger Band Squeeze signal: Bandwidth < threshold (e.g., 4% or rolling min)
-        df['BB_Width'] = (df['BB_Upper'] - df['BB_Lower']) / df['BB_Mid']
-        df['BB_Squeeze'] = df['BB_Width'] < 0.04  # Threshold for squeeze; adjust based on asset (or use df['BB_Width'].rolling(125).min())
-        
-        # Detect Bollinger Bands buy/sell (touch lower/upper)
-        df['BB_Buy'] = (df['Close'] <= df['BB_Lower'])
-        df['BB_Sell'] = (df['Close'] >= df['BB_Upper'])
-        
-        # RSI (14-period)
-        delta = df['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        df['RSI'] = 100 - (100 / (1 + rs))
-        
-        # MACD (12, 26, 9)
+
+        # ——— Detect mobile ———
+        mobile = is_mobile()
+
+        # ——— Always calculate indicators that both versions need ———
+        df['MA5']  = df['Close'].rolling(5).mean()
+        df['MA20'] = df['Close'].rolling(20).mean()
+        df['MA50'] = df['Close'].rolling(50).mean()
+
+        # MACD
         ema12 = df['Close'].ewm(span=12, adjust=False).mean()
         ema26 = df['Close'].ewm(span=26, adjust=False).mean()
-        df['MACD'] = ema12 - ema26
-        df['Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-        df['Histogram'] = df['MACD'] - df['Signal']
-        
-        # Create subplots: 4 rows (price + Bollinger, volume, MACD, RSI)
-        fig = make_subplots(
-            rows=4, cols=1,
-            row_heights=[0.5, 0.15, 0.2, 0.15],
-            shared_xaxes=True,
-            vertical_spacing=0.03,
-            subplot_titles=[f"{symbol} 5-Year Stock Price with MAs & Bollinger Bands", "Volume", "MACD", "RSI"]
-        )
-        
-        # Candlestick (row 1)
-        fig.add_trace(
-            go.Candlestick(
-                x=df.index,
-                open=df['Open'],
-                high=df['High'],
-                low=df['Low'],
-                close=df['Close'],
-                name='Candlestick'
-            ),
-            row=1, col=1
-        )
-        
-        # Moving Averages (row 1)
-        fig.add_trace(
-            go.Scatter(x=df.index, y=df['MA5'], name='MA5', line=dict(color='orange', width=1)),
-            row=1, col=1
-        )
-        fig.add_trace(
-            go.Scatter(x=df.index, y=df['MA20'], name='MA20', line=dict(color='green', width=1)),
-            row=1, col=1
-        )
-        fig.add_trace(
-            go.Scatter(x=df.index, y=df['MA50'], name='MA50', line=dict(color='blue', width=1)),
-            row=1, col=1
-        )
-        
-        # Bollinger Bands overlay (row 1)
-        fig.add_trace(
-            go.Scatter(x=df.index, y=df['BB_Upper'], name='BB Upper', line=dict(color='gray', width=1, dash='dash')),
-            row=1, col=1
-        )
-        fig.add_trace(
-            go.Scatter(x=df.index, y=df['BB_Lower'], name='BB Lower', line=dict(color='gray', width=1, dash='dash'), fill='tonexty', fillcolor='rgba(128,128,128,0.2)'),
-            row=1, col=1
-        )
-        fig.add_trace(
-            go.Scatter(x=df.index, y=df['BB_Mid'], name='BB Mid', line=dict(color='black', width=1)),
-            row=1, col=1
-        )
-        
-        # Bollinger Bands signals (buy/sell markers on price chart)
-        buy_signals = df[df['BB_Buy']]
-        fig.add_trace(
-            go.Scatter(
-                x=buy_signals.index,
-                y=buy_signals['Close'],
-                mode='markers',
-                name='BB Buy Signal',
-                marker=dict(symbol='triangle-up', size=10, color='green', line=dict(width=1, color='darkgreen'))
-            ),
-            row=1, col=1
-        )
-        
-        sell_signals = df[df['BB_Sell']]
-        fig.add_trace(
-            go.Scatter(
-                x=sell_signals.index,
-                y=sell_signals['Close'],
-                mode='markers',
-                name='BB Sell Signal',
-                marker=dict(symbol='triangle-down', size=10, color='red', line=dict(width=1, color='darkred'))
-            ),
-            row=1, col=1
-        )
-        
-        # Bollinger Squeeze signals (shaded areas on price chart during squeeze)
-        squeeze_periods = df[df['BB_Squeeze']]
-        if not squeeze_periods.empty:
-            fig.add_shape(
-                type="rect",
-                xref="x", yref="paper",
-                x0=squeeze_periods.index.min(),
-                x1=squeeze_periods.index.max(),
-                y0=0,
-                y1=1,
-                fillcolor="yellow",
-                opacity=0.3,
-                layer="below",
-                line=dict(width=0),
-                row=1, col=1
+        df['MACD']     = ema12 - ema26
+        df['Signal']   = df['MACD'].ewm(span=9, adjust=False).mean()
+        df['Histogram']= df['MACD'] - df['Signal']
+
+        # RSI
+        delta = df['Close'].diff()
+        gain  = delta.where(delta > 0, 0).rolling(14).mean()
+        loss  = -delta.where(delta < 0, 0).rolling(14).mean()
+        rs    = gain / loss
+        df['RSI'] = 100 - (100 / (1 + rs))
+
+        # ——————————————— MOBILE VERSION (simple & clean) ———————————————
+        if mobile:
+            fig = make_subplots(
+                rows=4, cols=1,
+                row_heights=[0.55, 0.15, 0.15, 0.15],
+                shared_xaxes=True,
+                vertical_spacing=0.02,
+                subplot_titles=(symbol, "Volume", "MACD", "RSI")
             )
-            fig.add_annotation(
-                text="Squeeze",
-                x=squeeze_periods.index.mean(),
-                y=0.95,
-                yref="paper",
-                showarrow=False,
-                font=dict(color="black", size=12),
-                row=1, col=1
+
+            # Candlestick + MAs
+            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'],
+                                         low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['MA5'],  name="MA5",  line=dict(color="orange")), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], name="MA20", line=dict(color="green")),  row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], name="MA50", line=dict(color="blue")),   row=1, col=1)
+
+            # Volume
+            fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name="Volume",
+                                 marker_color='rgba(128,128,128,0.5)'), row=2, col=1)
+
+            # MACD
+            fig.add_trace(go.Scatter(x=df.index, y=df['MACD'],   name="MACD",   line=dict(color="blue")), row=3, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['Signal'], name="Signal", line=dict(color="red")),   row=3, col=1)
+            fig.add_trace(go.Bar(x=df.index, y=df['Histogram'], name="Hist", marker_color="gray"),         row=3, col=1)
+
+            # RSI
+            fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], name="RSI", line=dict(color="purple")), row=4, col=1)
+            fig.add_hline(y=70, line_dash="dash", line_color="red",   row=4, col=1)
+            fig.add_hline(y=30, line_dash="dash", line_color="green", row=4, col=1)
+
+            fig.update_layout(
+                height=700,
+                showlegend=False,
+                xaxis_rangeslider_visible=False,
+                margin=dict(l=10, r=10, t=50, b=10),
+                template="plotly_white"
             )
-        
-        # Volume bars (row 2)
-        fig.add_trace(
-            go.Bar(
-                x=df.index,
-                y=df['Volume'],
-                name='Volume',
-                marker_color='rgba(128, 128, 128, 0.5)'
-            ),
-            row=2, col=1
-        )
-        
-        # MACD (row 3)
-        fig.add_trace(
-            go.Scatter(x=df.index, y=df['MACD'], name='MACD', line=dict(color='blue', width=1)),
-            row=3, col=1
-        )
-        fig.add_trace(
-            go.Scatter(x=df.index, y=df['Signal'], name='Signal', line=dict(color='red', width=1)),
-            row=3, col=1
-        )
-        fig.add_trace(
-            go.Bar(x=df.index, y=df['Histogram'], name='Histogram', marker_color='gray'),
-            row=3, col=1
-        )
-        
-        # RSI (row 4)
-        fig.add_trace(
-            go.Scatter(x=df.index, y=df['RSI'], name='RSI', line=dict(color='purple', width=1)),
-            row=4, col=1
-        )
-        fig.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought (70)", row=4, col=1)
-        fig.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Oversold (30)", row=4, col=1)
-        
-        # Update layout for responsiveness (no range slider on RSI)
-        show_legend = not is_mobile()
-        
-        fig.update_layout(
-            title=f"{symbol} 5-Year Stock Price with Technical Indicators",
-            xaxis_title="Date",
-            yaxis_title="Price (USD)",
-            yaxis2_title="Volume",
-            yaxis3_title="MACD",
-            yaxis4_title="RSI",
-            xaxis_rangeslider_visible=False,
-            showlegend=show_legend,
-            autosize=True,
-            margin=dict(l=40, r=40, t=40, b=40),
-            template='plotly',
-            width=None,
-            height=800  # Increased height for additional subplots
-        )
-        
-        fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
-        fig.update_xaxes(rangeslider_visible=False, row=2, col=1)
-        fig.update_xaxes(rangeslider_visible=False, row=3, col=1)
-        fig.update_xaxes(rangeslider_visible=False, row=4, col=1)  # Removed slider under RSI
-        
-        return fig
+            return fig
+
+        # ——————————————— DESKTOP VERSION (your original full chart) ———————————————
+        else:
+            # —— All the extra indicators you had before (Bollinger, squeeze, signals) ——
+            df['BB_Mid']  = df['Close'].rolling(20).mean()
+            df['BB_Std']  = df['Close'].rolling(20).std()
+            df['BB_Upper']= df['BB_Mid'] + df['BB_Std']*2
+            df['BB_Lower']= df['BB_Mid'] - df['BB_Std']*2
+            df['BB_Width']= (df['BB_Upper'] - df['BB_Lower']) / df['BB_Mid']
+            df['BB_Squeeze'] = df['BB_Width'] < 0.04
+            df['BB_Buy']  = df['Close'] <= df['BB_Lower']
+            df['BB_Sell'] = df['Close'] >= df['BB_Upper']
+
+            fig = make_subplots(
+                rows=4, cols=1,
+                row_heights=[0.5, 0.15, 0.2, 0.15],
+                shared_xaxes=True,
+                vertical_spacing=0.03,
+                subplot_titles=[f"{symbol} Technical Analysis", "Volume", "MACD", "RSI"]
+            )
+
+            # Candlestick
+            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'],
+                                         low=df['Low'], close=df['Close'], name='Candlestick'), row=1, col=1)
+
+            # Moving Averages
+            for ma, col in zip(['MA5','MA20','MA50'], ['orange','green','blue']):
+                fig.add_trace(go.Scatter(x=df.index, y=df[ma], name=ma, line=dict(color=col, width=1)), row=1, col=1)
+
+            # Bollinger Bands
+            fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], name='BB Upper', line=dict(color='gray', dash='dash')), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], name='BB Lower', line=dict(color='gray', dash='dash'),
+                                     fill='tonexty', fillcolor='rgba(128,128,128,0.2)'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['BB_Mid'], name='BB Mid', line=dict(color='black')), row=1, col=1)
+
+            # Buy/Sell signals
+            buy  = df[df['BB_Buy']]
+            sell = df[df['BB_Sell']]
+            fig.add_trace(go.Scatter(x=buy.index,  y=buy['Close'],  mode='markers', name='BB Buy',
+                                     marker=dict(symbol='triangle-up', size=10, color='green')), row=1, col=1)
+            fig.add_trace(go.Scatter(x=sell.index, y=sell['Close'], mode='markers', name='BB Sell',
+                                     marker=dict(symbol='triangle-down', size=10, color='red')), row=1, col=1)
+
+            # Squeeze shading
+            squeeze = df[df['BB_Squeeze']]
+            if not squeeze.empty:
+                fig.add_shape(type="rect", x0=squeeze.index.min(), x1=squeeze.index.max(),
+                              y0=0, y1=1, fillcolor="yellow", opacity=0.3, layer="below", line_width=0, row=1, col=1)
+
+            # Volume
+            fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume',
+                                 marker_color='rgba(128,128,128,0.5)'), row=2, col=1)
+
+            # MACD
+            fig.add_trace(go.Scatter(x=df.index, y=df['MACD'],   name='MACD',   line=dict(color='blue')), row=3, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['Signal'], name='Signal', line=dict(color='red')),   row=3, col=1)
+            fig.add_trace(go.Bar(x=df.index, y=df['Histogram'], name='Histogram', marker_color='gray'), row=3, col=1)
+
+            # RSI
+            fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], name='RSI', line=dict(color='purple')), row=4, col=1)
+            fig.add_hline(y=70, line_dash="dash", line_color="red",   row=4, col=1)
+            fig.add_hline(y=30, line_dash="dash", line_color="green", row=4, col=1)
+
+            fig.update_layout(
+                title=f"{symbol} • {period1} • {interval1}",
+                height=800,
+                showlegend=True,
+                xaxis_rangeslider_visible=False,
+                margin=dict(l=40, r=40, t=60, b=40),
+                template='plotly'
+            )
+            fig.update_xaxes(rangeslider_visible=False)
+            return fig
+
     except Exception as e:
         st.error(f"Failed to fetch or process chart for {symbol}: {e}")
         return None
-
-        
+            
 @st.cache_data(ttl=7200)
 def fetch_company_info(symbol):
     if (symbol== ""):
