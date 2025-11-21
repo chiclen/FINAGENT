@@ -37,6 +37,13 @@ def get_latest_update_time():
         return latest_time.strftime("%d-%m-%y %H:%M:%S")
     return "No updates found in the database."
 
+# Detect mobile browsers (works for iPhone Safari, Android Chrome, etc.)
+def is_mobile():
+    user_agent = st.context.headers.get("User-Agent", "").lower()
+    mobile_keywords = ["iphone", "ipad", "android", "mobile", "silk", "kindle", "windows phone"]
+    return any(keyword in user_agent for keyword in mobile_keywords)
+
+
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_stocks_data():
     """Load all stocks data from the database into a DataFrame."""
@@ -321,6 +328,8 @@ def fetch_stock_chart(symbol, period1, interval1):
         fig.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Oversold (30)", row=4, col=1)
         
         # Update layout for responsiveness (no range slider on RSI)
+        show_legend = not is_mobile()
+        
         fig.update_layout(
             title=f"{symbol} 5-Year Stock Price with Technical Indicators",
             xaxis_title="Date",
@@ -329,7 +338,7 @@ def fetch_stock_chart(symbol, period1, interval1):
             yaxis3_title="MACD",
             yaxis4_title="RSI",
             xaxis_rangeslider_visible=False,
-            showlegend=True,
+            showlegend=show_legend,
             autosize=True,
             margin=dict(l=40, r=40, t=40, b=40),
             template='plotly',
@@ -518,6 +527,8 @@ def main():
             period_options = [
                 "15 Minutes",
                 "30 Minutes",
+                "1 Week",
+                "1 Month",
                 "3 Months",
                 "6 Months",
                 "1 Year",
@@ -530,6 +541,8 @@ def main():
             period_map = {
                 "15 Minutes": ("1d", "15m"),
                 "30 Minutes": ("1d", "30m"),
+                "1 Week": ("5d", "1d"),
+                "1 Month":    ("1mo", "1d"),
                 "3 Months": ("3mo", "1d"),
                 "6 Months": ("6mo", "1d"),
                 "1 Year": ("1y", "1d"),
@@ -550,6 +563,7 @@ def main():
             )
 
             selected_period, selected_interval = period_map.get(selected_period)
+
 
             # Update session state
             # === Generate chart with selected period ===
