@@ -37,12 +37,33 @@ def get_latest_update_time():
         return latest_time.strftime("%d-%m-%y %H:%M:%S")
     return "No updates found in the database."
 
+# ——————————— ANIMATED GIF CHART FOR MOBILE (Using ChartGif.com) ———————————
+def get_animated_gif_chart(symbol):
+    symbol = symbol.upper().replace("^", "")  # Clean symbol
+    # ChartGif.com – best free animated stock GIFs
+    gif_url = f"https://chartgif.com/chart/{symbol}.gif"
+    return gif_url
+
 # Detect mobile browsers (works for iPhone Safari, Android Chrome, etc.)
 def is_mobile():
     user_agent = st.context.headers.get("User-Agent", "").lower()
     mobile_keywords = ["iphone", "ipad", "android", "mobile", "silk", "kindle", "windows phone"]
     return any(keyword in user_agent for keyword in mobile_keywords)
 
+def disable_chart_zoom():
+    if is_mobile():
+        st.markdown(f"""
+        <style>
+        /* Target only the chart image by adding a unique class */
+        .no-zoom-chart img {{
+            pointer-events: none !important;
+            touch-action: pan-x pan-y !important;
+            user-select: none !important;
+            -webkit-user-drag: none !important;
+            -webkit-touch-callout: none !important;
+        }}
+        </style>
+        """, unsafe_allow_html=True)
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_stocks_data():
@@ -503,16 +524,21 @@ def main():
             )
 
             selected_period, selected_interval = period_map.get(selected_period)
-
-
-            # Update session state
-            # === Generate chart with selected period ===
-            fig = fetch_stock_chart(sym, selected_period, selected_interval)
-
-            if fig:
-                st.plotly_chart(fig, use_container_width=True)
+            # ——————— MOBILE: Show Animated GIF ———————
+            if is_mobile():
+                st.markdown("### Animated Chart (Mobile View)")
+                gif_url = get_animated_gif_chart(sym)
+                st.image(gif_url, use_container_width=True)
+                st.caption("Live animated chart • Double-tap to zoom • Powered by ChartGif.com")
             else:
-                st.warning("No chart data available for this timeframe.")
+                # Update session state
+                # === Generate chart with selected period ===
+                fig = fetch_stock_chart(sym, selected_period, selected_interval)
+
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("No chart data available for this timeframe.")
         else:
             st.info("Select a stock to view its chart.")
     
