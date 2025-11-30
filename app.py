@@ -485,7 +485,7 @@ def main():
     with tabs[0]:
         if st.session_state.selected_symbol:
             sym = st.session_state.selected_symbol
-            if not is_mobile():
+            if is_mobile():
                 period_options = [
                     "Day",
                     "Week",
@@ -544,7 +544,7 @@ def main():
 
             selected_period, selected_interval , chart_index= period_map.get(selected_period)
             # ——————— MOBILE: Show Animated GIF ———————
-            if not is_mobile():
+            if is_mobile():
                 st.markdown("### Animated Chart (Mobile View)")
                 gif_url = get_animated_gif_chart(sym, chart_index)
                 st.markdown(f"""
