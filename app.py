@@ -40,7 +40,10 @@ def get_latest_update_time():
 # ——————————— ANIMATED GIF CHART FOR MOBILE (Using ChartGif.com) ———————————
 def get_animated_gif_chart(symbol, timeframe):
     symbol = symbol.upper().strip()
-    url=f"https://finviz.com/chart.ashx?t={symbol}&ty=c&ta=1&p={timeframe}&s=l"
+    url=(f"https://finviz.com/chart.ashx?t={symbol}&ty=c&ta=1&p={timeframe}&s=l"
+    f"&ta_st=rsi,macd"           # ← RSI + MACD stacked under price
+    f"&ta0_p=period14"           # RSI period
+    f"&ta1_p=12,26,9")            # MACD fast,slow,signal
     return url
 
 # Detect mobile browsers (works for iPhone Safari, Android Chrome, etc.)
@@ -482,7 +485,7 @@ def main():
     with tabs[0]:
         if st.session_state.selected_symbol:
             sym = st.session_state.selected_symbol
-            if is_mobile():
+            if not is_mobile():
                 period_options = [
                     "Day",
                     "Week",
@@ -541,7 +544,7 @@ def main():
 
             selected_period, selected_interval , chart_index= period_map.get(selected_period)
             # ——————— MOBILE: Show Animated GIF ———————
-            if is_mobile():
+            if not is_mobile():
                 st.markdown("### Animated Chart (Mobile View)")
                 gif_url = get_animated_gif_chart(sym, chart_index)
                 st.markdown(f"""
