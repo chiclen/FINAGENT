@@ -116,6 +116,39 @@ def load_stocks_data():
         st.warning("No data returned from database query.")
     return df
 
+def load_watchlist_from_db():
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        df = pd.read_sql("SELECT symbol FROM watchlist ORDER BY added_at DESC", conn)
+        return df['symbol'].str.upper().tolist()
+    except:
+        return []
+    finally:
+        conn.close()
+
+def save_watchlist_to_db(symbols):
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute("DELETE FROM watchlist")  # clear old
+    for sym in symbols:
+        conn.execute("INSERT OR IGNORE INTO watchlist (symbol) VALUES (?)", (sym.upper(),))
+    conn.commit()
+    conn.close()
+
+def add_to_watchlist(symbol):
+    symbol = symbol.upper()
+    current = load_watchlist_from_db()
+    if symbol not in current:
+        current.append(symbol)
+        save_watchlist_to_db(current)
+
+def remove_from_watchlist(symbol):
+    symbol = symbol.upper()
+    current = load_watchlist_from_db()
+    if symbol in current:
+        current.remove(symbol)
+        save_watchlist_to_db(current)
+        st.rerun()  # refresh immediately
+
 @st.cache_data(ttl=3600)  # Cache for 1 hour due to yfinance rate limits
 def fetch_news(symbol):
     if (symbol==""): 
@@ -349,9 +382,6 @@ def main():
     st.session_state.selected_symbol = ""
     # Layout
     st.subheader("Stock Analyzer")
-    col_refresh, col_info = st.columns([1, 3])
-    with col_refresh:
-        script_path = "DataFeedFromYahoo.py"
 
     # Load data
     df = load_stocks_data()
@@ -359,6 +389,27 @@ def main():
         st.warning("No data found in the database or an error occurred. Run DataFeed first!")
         st.info("Click the 'Download Data from yahoo' button above to populate the database.")
         return
+    # === FIX COLUMN NAMES ONCE AND FOR ALL ===
+    df.columns = df.columns.str.strip()                    # remove any spaces
+    df.columns = df.columns.str.replace(' ', '_')          # spaces → underscores
+    df.columns = df.columns.str.lower()                    # all lowercase
+    
+    # Force exact column names we need
+    column_mapping = {
+        'last_updated': 'last_updated',
+        'lastupdated': 'last_updated',
+        'lastupdate': 'last_updated',
+        'updated': 'last_updated',
+        'date': 'last_updated',
+        'timestamp': 'last_updated',
+    }
+    df = df.rename(columns=column_mapping)
+    
+    # Ensure these columns exist (create if missing)
+    for col in ['symbol', 'company_name', 'current_price', 'week_high_52', 
+                'week_low_52', 'dist_to_high_pct', 'dist_to_low_pct', 'last_updated']:
+        if col not in df.columns:
+            df[col] = None  # or appropriate default
 
     # Column config with progress bars
     column_config = {
@@ -403,6 +454,92 @@ def main():
         "View Mode", ["Close to High", "Close to Low", "Both"],
         disabled=False
     )
+    st.sidebar.markdown("---")  # separator
+    st.sidebar.header("Watch List")
+    new_symbol = st.sidebar.text_input(
+        "Add stock to watchlist",
+        placeholder="e.g. AAPL, TSLA, NVDA",
+        label_visibility="collapsed",
+        key="add_stock_input"
+    )
+
+    add_btn = st.sidebar.button("Add", use_container_width=True, type="primary")
+
+    if add_btn:
+        if new_symbol:
+            symbol = new_symbol.strip().upper()
+            if len(symbol) < 1 or len(symbol) > 10:
+                st.error("Invalid symbol length")
+            elif symbol in st.session_state.my_watchlist:
+                st.info(f"{symbol} is already in your watchlist")
+            elif symbol not in df['symbol'].str.upper().values:
+                st.warning(f"{symbol} not found in database")
+            else:
+                add_to_watchlist(symbol)
+                disabled=False
+        else:
+            st.error("Please enter a symbol")
+
+    st.markdown("---")  # separator
+
+    # Load watchlist at app start
+    st.session_state.my_watchlist = load_watchlist_from_db()
+
+    if st.session_state.my_watchlist:
+        st.subheader("Watch list")
+        # Filter only symbols that exist in main df
+        valid_symbols = [s for s in st.session_state.my_watchlist if s in df['symbol'].str.upper().values]
+        if not valid_symbols:
+            st.warning("None of your watchlist symbols are in the database.")
+            if st.button("Clear invalid watchlist"):
+                st.session_state.my_watchlist = []
+                save_watchlist_to_db([])
+                st.rerun()
+        else:
+            watch_df = df[df['symbol'].str.upper().isin(valid_symbols)].copy()
+
+            # Ensure all required columns exist
+            required_cols = ["symbol",  "current_price", 
+                            "dist_to_high_pct", "dist_to_low_pct","company_name", "Trash"]
+            for col in required_cols:
+                if col not in watch_df.columns:
+                    watch_df[col] = "—"
+
+            # Sort by how close to 52W high
+            watch_df = watch_df.sort_values("dist_to_high_pct", ascending=True)
+
+            # Final display columns
+            display_cols = ["symbol",  "current_price",
+                            "dist_to_high_pct", "dist_to_low_pct", "company_name", "Trash"]
+
+            st.dataframe(
+                watch_df[display_cols],
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "symbol": st.column_config.TextColumn("Symbol", width="small"),
+                    "current_price": st.column_config.NumberColumn("Price", format="$%.2f"),
+                    "dist_to_high_pct": st.column_config.NumberColumn("% from High", format="%.1f%%"),
+                    "dist_to_low_pct": st.column_config.NumberColumn("% from Low", format="%.1f%%"),
+                    "company_name": st.column_config.TextColumn("Name"),
+                },
+                on_select="rerun",
+                selection_mode="single-row",
+                key="watchlist_final"
+            )
+
+            # Row click → show chart
+            selected = st.session_state.get("watchlist_final", {}).get("selection", {})
+            if selected and selected.get("rows"):
+                idx = selected["rows"][0]
+                symbol = watch_df.iloc[idx]["symbol"]
+                st.session_state.selected_symbol = symbol    
+
+        # Clear button
+        if st.button("Clear Watchlist", type="secondary"):
+            st.session_state.my_watchlist = []
+            save_watchlist_to_db([])
+            st.rerun()
 
     # Stock Info Table
     filtered_df = df[df['category'].isin(cap_filter)] if cap_filter else df
@@ -415,6 +552,7 @@ def main():
         if cap_df.empty:
             st.info(f"No {cap} stocks available.")
             continue
+
         if view_type == "Close to High":
             close_to_high = cap_df[cap_df['dist_to_high_pct'] <= threshold].copy()
             close_to_high = close_to_high.sort_values('dist_to_high_pct')
@@ -480,7 +618,7 @@ def main():
                 )
                 if selected_row.selection.rows:
                     st.session_state.selected_symbol = close_to_low.iloc[selected_row.selection.rows[0]]['symbol']
- 
+        
     tabs = st.tabs(["Chart", "News", "Company Info"])
     with tabs[0]:
         if st.session_state.selected_symbol:
@@ -558,7 +696,7 @@ def main():
                 fig = fetch_stock_chart(sym, selected_period, selected_interval)
 
                 if fig:
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                 else:
                     st.warning("No chart data available for this timeframe.")
         else:
