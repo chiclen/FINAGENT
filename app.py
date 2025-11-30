@@ -38,11 +38,10 @@ def get_latest_update_time():
     return "No updates found in the database."
 
 # ——————————— ANIMATED GIF CHART FOR MOBILE (Using ChartGif.com) ———————————
-def get_animated_gif_chart(symbol):
-    symbol = symbol.upper().replace("^", "")  # Clean symbol
-    # ChartGif.com – best free animated stock GIFs
-    gif_url = f"https://chartgif.com/chart/{symbol}.gif"
-    return gif_url
+def get_animated_gif_chart(symbol, timeframe):
+    symbol = symbol.upper().strip()
+    url=f"https://finviz.com/chart.ashx?t={symbol}&ty=c&ta=1&p={timeframe}&s=l"
+    return url
 
 # Detect mobile browsers (works for iPhone Safari, Android Chrome, etc.)
 def is_mobile():
@@ -483,38 +482,55 @@ def main():
     with tabs[0]:
         if st.session_state.selected_symbol:
             sym = st.session_state.selected_symbol
+            if is_mobile():
+                period_options = [
+                    "Day",
+                    "Week",
+                    "Month",
+                ]
 
-            # === NEW: Dropdown for time period ===
-            period_options = [
-                "15 Minutes",
-                "30 Minutes",
-                "1 Week",
-                "1 Month",
-                "3 Months",
-                "6 Months",
-                "1 Year",
-                "5 Years",
-                "10 Years",
-                "All Available"
-            ]
+                # Map user-friendly names to yfinance parameters
+                period_map = {
+                    "Day": ("1y", "1d","d"),
+                    "Week": ("5y", "1d","w"),
+                    "Month": ("10y", "1d","m")
+                }
 
-            # Map user-friendly names to yfinance parameters
-            period_map = {
-                "15 Minutes": ("1d", "15m"),
-                "30 Minutes": ("1d", "30m"),
-                "1 Week": ("5d", "1d"),
-                "1 Month":    ("1mo", "1d"),
-                "3 Months": ("3mo", "1d"),
-                "6 Months": ("6mo", "1d"),
-                "1 Year": ("1y", "1d"),
-                "5 Years": ("5y", "1d"),
-                "10 Years": ("10y", "1d"),
-                "All Available": ("max", "1mo")  # "max" with monthly for very long history
-            }
-            
-            # Remember user's last choice
-            if 'chart_period' not in st.session_state:
-                st.session_state.chart_period = "5 Years"
+                if 'chart_period' not in st.session_state:
+                    st.session_state.chart_period = "Day"
+            else: 
+                # === NEW: Dropdown for time period ===
+                period_options = [
+                    "15 Minutes",
+                    "30 Minutes",
+                    "1 Week",
+                    "1 Month",
+                    "3 Months",
+                    "6 Months",
+                    "1 Year",
+                    "5 Years",
+                    "10 Years",
+                    "All Available"
+                ]
+
+                # Map user-friendly names to yfinance parameters
+                period_map = {
+                    "15 Minutes": ("1d", "15m", "i"),
+                    "30 Minutes": ("1d", "30m","i"),
+                    "1 Week": ("5d", "1d", "d"),
+                    "1 Month":    ("1mo", "1d","d"),
+                    "3 Months": ("3mo", "1d","d"),
+                    "6 Months": ("6mo", "1d","d"),
+                    "1 Year": ("1y", "1d","d"),
+                    "5 Years": ("5y", "1d","w"),
+                    "10 Years": ("10y", "1d","m"),
+                    "All Available": ("max", "1mo","m")  # "max" with monthly for very long history
+                }
+                # Remember user's last choice
+                if 'chart_period' not in st.session_state:
+                    st.session_state.chart_period = "5 Years"
+
+            period = st.session_state.chart_period
 
             selected_period = st.selectbox(
                 "Chart Timeframe",
@@ -523,12 +539,15 @@ def main():
                 key="period_selector"
             )
 
-            selected_period, selected_interval = period_map.get(selected_period)
+            selected_period, selected_interval , chart_index= period_map.get(selected_period)
             # ——————— MOBILE: Show Animated GIF ———————
             if is_mobile():
                 st.markdown("### Animated Chart (Mobile View)")
-                gif_url = get_animated_gif_chart(sym)
-                st.image(gif_url, use_container_width=True)
+                gif_url = get_animated_gif_chart(sym, chart_index)
+                st.markdown(f"""
+                <img src="{gif_url}" 
+                    style="width:100%; border-radius:8px; pointer-events:none; touch-action:pan-x pan-y; user-select:none;">
+                """, unsafe_allow_html=True)
                 st.caption("Live animated chart • Double-tap to zoom • Powered by ChartGif.com")
             else:
                 # Update session state
