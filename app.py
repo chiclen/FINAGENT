@@ -527,7 +527,7 @@ def main():
                 selection_mode="single-row",
                 key="watchlist_final"
             )
-
+            symbol = ""
             # Row click → show chart
             selected = st.session_state.get("watchlist_final", {}).get("selection", {})
             if selected and selected.get("rows"):
@@ -537,9 +537,9 @@ def main():
 
         # Clear button
         if st.button("Clear Watchlist", type="secondary"):
-            st.session_state.my_watchlist = []
-            save_watchlist_to_db([])
-            st.rerun()
+            if symbol !="": 
+                remove_from_watchlist(symbol)
+                st.rerun()
 
     # Stock Info Table
     filtered_df = df[df['category'].isin(cap_filter)] if cap_filter else df
