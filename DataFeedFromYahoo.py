@@ -231,7 +231,8 @@ def fetch_price_data(symbols, all_stocks,warning_log, new_record):
                     else:
                         current_price = float(current_price)
                     # 
-                    company_name = all_stocks[j].get('name', '')
+                    #company_name = all_stocks[j].get('name', '')
+                    company_name=symbol_quote.get('shortName', '')
                     #52 weeks high
                     symbol_detail = summary_detail.get(symbol,{})
                     week_high_52 = symbol_detail.get('fiftyTwoWeekHigh',0) 
