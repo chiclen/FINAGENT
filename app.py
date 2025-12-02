@@ -500,7 +500,7 @@ def main():
 
             # Ensure all required columns exist
             required_cols = ["symbol",  "current_price", 
-                            "dist_to_high_pct", "dist_to_low_pct","company_name", "Trash"]
+                            "dist_to_high_pct", "dist_to_low_pct","company_name"]
             for col in required_cols:
                 if col not in watch_df.columns:
                     watch_df[col] = "—"
@@ -510,11 +510,10 @@ def main():
 
             # Final display columns
             display_cols = ["symbol",  "current_price",
-                            "dist_to_high_pct", "dist_to_low_pct", "company_name", "Trash"]
+                            "dist_to_high_pct", "dist_to_low_pct", "company_name"]
 
             st.dataframe(
                 watch_df[display_cols],
-                width="stretch",
                 hide_index=True,
                 column_config={
                     "symbol": st.column_config.TextColumn("Symbol", width="small"),
