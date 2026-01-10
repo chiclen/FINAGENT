@@ -58,22 +58,13 @@ def add_index_overlay(fig, df_main, index_ticker, name, color, visible, period, 
     except:
         pass  # Silent fail if index data unavailable
 
-# ——————————— ANIMATED GIF CHART FOR MOBILE (Using ChartGif.com) ———————————
-def get_animated_gif_chart(symbol, timeframe):
-    symbol = symbol.upper().strip()
-    url=(f"https://finviz.com/chart.ashx?t={symbol}&ty=c&ta=1&p={timeframe}&s=l"
-    f"&ta_st=rsi,macd"           # ← RSI + MACD stacked under price
-    f"&ta0_p=period14"           # RSI period
-    f"&ta1_p=12,26,9")            # MACD fast,slow,signal
-    return url
-
 # Detect mobile browsers (works for iPhone Safari, Android Chrome, etc.)
 def is_mobile():
     user_agent = st.context.headers.get("User-Agent", "").lower()
     mobile_keywords = ["iphone", "ipad", "android", "mobile", "silk", "kindle", "windows phone"]
-    #return any(keyword in user_agent for keyword in mobile_keywords)
+    return any(keyword in user_agent for keyword in mobile_keywords)
     #return True
-    return False
+    #return False
 
 def disable_chart_zoom():
     if is_mobile():
@@ -89,6 +80,19 @@ def disable_chart_zoom():
         }}
         </style>
         """, unsafe_allow_html=True)
+
+def get_plotly_mobile_config():
+    """Config to disable zoom, drag, and toolbar on mobile."""
+    return {
+        "scrollZoom": False,                    # No mouse wheel zoom
+        "dragMode": False,                      # No drag to zoom/pan
+        "displayModeBar": False,                # Hide toolbar completely on mobile
+        "modeBarButtonsToRemove": [             # Remove all interactive buttons
+            "zoom2d", "pan2d", "zoomIn2d", "zoomOut2d",
+            "autoScale2d", "resetScale2d", "lasso2d", "select2d"
+        ],
+        "responsive": True
+    }
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def load_stocks_data():
@@ -286,7 +290,7 @@ def fetch_stock_chart(symbol, period1, interval1, index_choice1):
         volumeRow = 3
         macdRow = 4
         rsiRow = 5
-        if not mobile:
+        if not mobile or mobile:
             # —— All the extra indicators you had before (Bollinger, squeeze, signals) ——
             if "None" in index_choice1: 
                 fig = make_subplots(
@@ -294,10 +298,9 @@ def fetch_stock_chart(symbol, period1, interval1, index_choice1):
                     row_heights=[0.15, 0.6, 0.4, 0.20, 0.10],# Price 40%, Volume 30%, MACD 15%, RSI 15%
                     shared_xaxes=True,
                     vertical_spacing=0.03,   
-                    subplot_titles=[f"{symbol} Quarterly EPS", "{symbol} Candle Stick", "Volume", "MACD", "RSI"]
+                    subplot_titles=[f"{symbol} Quarterly EPS", f"{symbol} Candle Stick", "Volume", "MACD", "RSI"]
                 )
             else:
-
                 if "S&P 500" in index_choice1:
                     name = "Index: S&P 500"
                 
@@ -309,7 +312,7 @@ def fetch_stock_chart(symbol, period1, interval1, index_choice1):
                     row_heights=[0.15, 0.3, 0.6, 0.2, 0.2, 0.2],# index 30% , Price 40%, Volume 20%, MACD 5%, RSI 5%
                     shared_xaxes=True,
                     vertical_spacing=0.03,   
-                    subplot_titles=[f"{symbol} Quarterly EPS", name,"Technical Analysis", "Volume", "MACD", "RSI"]
+                    subplot_titles=[f"{symbol} Quarterly EPS", name,f"{symbol} Candle Stick", "Volume", "MACD", "RSI"]
                 )
 
                 # index 
@@ -377,6 +380,10 @@ def fetch_stock_chart(symbol, period1, interval1, index_choice1):
                 template='plotly'
             )
             fig.update_xaxes(rangeslider_visible=False)
+            if mobile:
+                fig.update_layout(showlegend=False)
+            else:
+                fig.update_layout(showlegend=True)
             return fig
 
     except Exception as e:
@@ -714,115 +721,93 @@ def main():
     with tabs[0]:
         if st.session_state.selected_symbol:
             sym = st.session_state.selected_symbol
-            if is_mobile():
-                period_options = [
-                    "Day",
-                    "Week",
-                    "Month",
-                ]
+            st.subheader(f"Chart — {st.session_state.selected_symbol}")
 
-                # Map user-friendly names to yfinance parameters
-                period_map = {
-                    "Day": ("1y", "1d","d"),
-                    "Week": ("5y", "1d","w"),
-                    "Month": ("10y", "1d","m")
-                }
+            period_options = [
+                "15 Minutes", "30 Minutes", "1 Week", "1 Month", "3 Months",
+                "6 Months", "1 Year", "5 Years", "10 Years", "All Available"
+            ]
 
-                if 'chart_period' not in st.session_state:
-                    st.session_state.chart_period = "Day"
+            # Horizontal buttons — looks great on mobile & desktop
+            selected_period = st.radio(
+                "Time Period",
+                options=period_options,
+                index=7,  # default = "5 Years" (change as needed)
+                horizontal=True,
+                label_visibility="collapsed"  # hides the label above
+            )
 
-                selected_period = st.radio(
-                    "Time Period",
-                    options=period_options,
-                    index=1,  # default = "5 Years" (change as needed)
-                    horizontal=True,
-                    label_visibility="collapsed"  # hides the label above
-                )
-            else: 
-                st.subheader(f"Chart — {st.session_state.selected_symbol}")
+            # Optional: Add custom styling for larger buttons
+            st.markdown("""
+            <style>
+            div.row-widget.stRadio > div {
+                flex-direction: row;
+                gap: 10px;
+            }
+            div.row-widget.stRadio > div label {
+                background-color: #f0f2f6;
+                padding: 10px 20px;
+                border-radius: 8px;
+                border: 1px solid #d0d7de;
+                font-weight: 500;
+            }
+            div.row-widget.stRadio > div label[data-checked="true"] {
+                background-color: #1f77b4 !important;
+                color: white !important;
+                border-color: #1f77b4;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+                            
+            # === NEW: Dropdown for time period ===
+            # Map user-friendly names to yfinance parameters
+            period_map = {
+                "15 Minutes": ("1d", "15m", "i"),
+                "30 Minutes": ("1d", "30m","i"),
+                "1 Week": ("5d", "1d", "d"),
+                "1 Month":    ("1mo", "1d","d"),
+                "3 Months": ("3mo", "1d","d"),
+                "6 Months": ("6mo", "1d","d"),
+                "1 Year": ("1y", "1d","d"),
+                "5 Years": ("5y", "1d","w"),
+                "10 Years": ("10y", "1d","m"),
+                "All Available": ("max", "1mo","m")  # "max" with monthly for very long history
+            }
+            # Remember user's last choice
+            if 'chart_period' not in st.session_state:
+                st.session_state.chart_period = "5 Years"
 
-                period_options = [
-                    "15 Minutes", "30 Minutes", "1 Week", "1 Month", "3 Months",
-                    "6 Months", "1 Year", "5 Years", "10 Years", "All Available"
-                ]
-
-                # Horizontal buttons — looks great on mobile & desktop
-                selected_period = st.radio(
-                    "Time Period",
-                    options=period_options,
-                    index=7,  # default = "5 Years" (change as needed)
-                    horizontal=True,
-                    label_visibility="collapsed"  # hides the label above
-                )
-
-                # Optional: Add custom styling for larger buttons
-                st.markdown("""
-                <style>
-                div.row-widget.stRadio > div {
-                    flex-direction: row;
-                    gap: 10px;
-                }
-                div.row-widget.stRadio > div label {
-                    background-color: #f0f2f6;
-                    padding: 10px 20px;
-                    border-radius: 8px;
-                    border: 1px solid #d0d7de;
-                    font-weight: 500;
-                }
-                div.row-widget.stRadio > div label[data-checked="true"] {
-                    background-color: #1f77b4 !important;
-                    color: white !important;
-                    border-color: #1f77b4;
-                }
-                </style>
-                """, unsafe_allow_html=True)
-                                
-                # === NEW: Dropdown for time period ===
-                # Map user-friendly names to yfinance parameters
-                period_map = {
-                    "15 Minutes": ("1d", "15m", "i"),
-                    "30 Minutes": ("1d", "30m","i"),
-                    "1 Week": ("5d", "1d", "d"),
-                    "1 Month":    ("1mo", "1d","d"),
-                    "3 Months": ("3mo", "1d","d"),
-                    "6 Months": ("6mo", "1d","d"),
-                    "1 Year": ("1y", "1d","d"),
-                    "5 Years": ("5y", "1d","w"),
-                    "10 Years": ("10y", "1d","m"),
-                    "All Available": ("max", "1mo","m")  # "max" with monthly for very long history
-                }
-                # Remember user's last choice
-                if 'chart_period' not in st.session_state:
-                    st.session_state.chart_period = "5 Years"
-
-                index_choice = st.radio(
-                    "Compare With",
-                    options=["None", "S&P 500", "Nasdaq"],
-                    index=0,
-                    horizontal=True
-                )
+            index_choice = st.radio(
+                "Compare With",
+                options=["None", "S&P 500", "Nasdaq"],
+                index=0,
+                horizontal=True
+            )
 
             period = st.session_state.chart_period
 
             selected_period, selected_interval , chart_index= period_map.get(selected_period)
-            # ——————— MOBILE: Show Animated GIF ———————
-            if is_mobile():
-                st.markdown("### Animated Chart (Mobile View)")
-                gif_url = get_animated_gif_chart(sym, chart_index)
-                st.markdown(f"""
-                <img src="{gif_url}" 
-                    style="width:100%; border-radius:8px; pointer-events:none; touch-action:pan-x pan-y; user-select:none;">
-                """, unsafe_allow_html=True)
-                st.caption("Live animated chart • Double-tap to zoom • Powered by ChartGif.com")
-            else:
-                # Update session state
-                # === Generate chart with selected period ===
-                fig = fetch_stock_chart(sym, selected_period, selected_interval,index_choice)
 
-                if fig:
-                    st.plotly_chart(fig, width="stretch")
-                else:
-                    st.warning("No chart data available for this timeframe.")
+            # Update session state
+            # === Generate chart with selected period ===
+            fig = fetch_stock_chart(sym, selected_period, selected_interval,index_choice)
+
+            if fig:
+                config = get_plotly_mobile_config() if is_mobile() else {
+                        "responsive": True,
+                        "displayModeBar": True
+                }
+                    
+                #disable_chart_zoom()  # Your existing CSS function (optional extra safety)
+
+                st.plotly_chart(
+                        fig,
+                        config=config,
+                        width="stretch",
+                        height=1300
+                )
+            else:
+                st.warning("No chart data available for this timeframe.")
     with tabs[1]:    
         df2 = fetch_news(st.session_state.selected_symbol)
         if df2 is not None and not df2.empty:
