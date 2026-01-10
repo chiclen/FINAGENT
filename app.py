@@ -62,8 +62,8 @@ def add_index_overlay(fig, df_main, index_ticker, name, color, visible, period, 
 def is_mobile():
     user_agent = st.context.headers.get("User-Agent", "").lower()
     mobile_keywords = ["iphone", "ipad", "android", "mobile", "silk", "kindle", "windows phone"]
-    #return any(keyword in user_agent for keyword in mobile_keywords)
-    return True
+    return any(keyword in user_agent for keyword in mobile_keywords)
+    #return True
     #return False
 
 def disable_chart_zoom():
