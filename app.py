@@ -68,30 +68,30 @@ def is_mobile():
 
 def disable_chart_zoom():
     if is_mobile():
-        st.markdown(f"""
-        <style>
-        /* Target only the chart image by adding a unique class */
-        .no-zoom-chart img {{
-            pointer-events: none !important;
-            touch-action: pan-x pan-y !important;
-            user-select: none !important;
-            -webkit-user-drag: none !important;
-            -webkit-touch-callout: none !important;
-        }}
-        </style>
+        st.markdown("""
+            <style>
+            .no-zoom-chart img {
+                pointer-events: none !important;
+                touch-action: pan-x pan-y !important;
+                user-select: none !important;
+                -webkit-user-drag: none !important;
+                -webkit-touch-callout: none !important;
+            }
+            </style>
         """, unsafe_allow_html=True)
 
 def get_plotly_mobile_config():
-    """Config to disable zoom, drag, and toolbar on mobile."""
+    """Config to completely disable zoom/drag/toolbar on mobile."""
     return {
-        "scrollZoom": False,                    # No mouse wheel zoom
-        "dragMode": False,                      # No drag to zoom/pan
-        "displayModeBar": False,                # Hide toolbar completely on mobile
-        "modeBarButtonsToRemove": [             # Remove all interactive buttons
+        "scrollZoom": False,                    # No pinch/scroll zoom
+        "dragMode": False,                      # No finger drag or pan
+        "displayModeBar": False,                # Hide all toolbar buttons
+        "doubleClick": False,                   # Disable double-tap zoom
+        "modeBarButtonsToRemove": [             # Remove any remaining buttons
             "zoom2d", "pan2d", "zoomIn2d", "zoomOut2d",
             "autoScale2d", "resetScale2d", "lasso2d", "select2d"
         ],
-        "responsive": True
+        "responsive": True                      # Still responsive to screen size
     }
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -793,19 +793,27 @@ def main():
             fig = fetch_stock_chart(sym, selected_period, selected_interval,index_choice)
 
             if fig:
-                config = get_plotly_mobile_config() if is_mobile() else {
-                        "responsive": True,
-                        "displayModeBar": True
-                }
-                    
-                #disable_chart_zoom()  # Your existing CSS function (optional extra safety)
-
-                st.plotly_chart(
-                        fig,
-                        config=config,
-                        width="stretch",
-                        height=1300
-                )
+                if is_mobile():
+                    # On mobile: render as static PNG image (no zoom, no interaction)
+                    try:
+                        # Generate high-quality PNG
+                        img_bytes = fig.to_image(
+                            format="png",
+                            width=900,          # suitable for mobile portrait
+                            height=800,
+                            scale=1             # 2x resolution for sharpness
+                        )
+                        st.image(
+                            img_bytes,
+                            caption="Static chart (mobile view - zoom disabled)"
+                        )
+                    except Exception as e:
+                        st.warning(f"Could not render static image: {e}")
+                        # Fallback to interactive if image fails
+                        st.plotly_chart(fig, config=get_plotly_mobile_config(), use_container_width=True, height=1300)
+                else:
+                    # Desktop: keep interactive Plotly chart
+                    st.plotly_chart(fig, config={"responsive": True, "displayModeBar": True}, use_container_width=True, height=1300)
             else:
                 st.warning("No chart data available for this timeframe.")
     with tabs[1]:    
