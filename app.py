@@ -62,8 +62,8 @@ def add_index_overlay(fig, df_main, index_ticker, name, color, visible, period, 
 def is_mobile():
     user_agent = st.context.headers.get("User-Agent", "").lower()
     mobile_keywords = ["iphone", "ipad", "android", "mobile", "silk", "kindle", "windows phone"]
-    return any(keyword in user_agent for keyword in mobile_keywords)
-    #return True
+    #return any(keyword in user_agent for keyword in mobile_keywords)
+    return True
     #return False
 
 def disable_chart_zoom():
@@ -794,28 +794,27 @@ def main():
 
             if fig:
                 if is_mobile():
-                    # On mobile: render as static PNG image (no zoom, no interaction)
+                    # Mobile: force static PNG (no kaleido needed on client)
                     try:
-                        # Generate high-quality PNG
+                        # Generate image server-side (kaleido runs on your server, not client)
                         img_bytes = fig.to_image(
                             format="png",
-                            width=900,          # suitable for mobile portrait
-                            height=800,
-                            scale=1             # 2x resolution for sharpness
+                            width=1000,          # mobile-friendly size
+                            height=1400            # sharp retina quality
                         )
                         st.image(
                             img_bytes,
-                            caption="Static chart (mobile view - zoom disabled)"
+                            use_container_width=True,   # ← Fixed: modern parameter
+                            caption="Static chart (mobile view – zoom disabled for better experience)"
                         )
                     except Exception as e:
-                        st.warning(f"Could not render static image: {e}")
-                        # Fallback to interactive if image fails
+                        st.warning(f"Static image failed: {e}. Showing interactive version.")
                         st.plotly_chart(fig, config=get_plotly_mobile_config(), use_container_width=True, height=1300)
                 else:
-                    # Desktop: keep interactive Plotly chart
+                    # Desktop: full interactive
                     st.plotly_chart(fig, config={"responsive": True, "displayModeBar": True}, use_container_width=True, height=1300)
             else:
-                st.warning("No chart data available for this timeframe.")
+                st.warning("No chart data available.")
     with tabs[1]:    
         df2 = fetch_news(st.session_state.selected_symbol)
         if df2 is not None and not df2.empty:
