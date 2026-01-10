@@ -71,8 +71,9 @@ def get_animated_gif_chart(symbol, timeframe):
 def is_mobile():
     user_agent = st.context.headers.get("User-Agent", "").lower()
     mobile_keywords = ["iphone", "ipad", "android", "mobile", "silk", "kindle", "windows phone"]
-    return any(keyword in user_agent for keyword in mobile_keywords)
+    #return any(keyword in user_agent for keyword in mobile_keywords)
     #return True
+    return False
 
 def disable_chart_zoom():
     if is_mobile():
@@ -554,7 +555,7 @@ def main():
         key="add_stock_input"
     )
 
-    add_btn = st.sidebar.button("Add", width="stretch", type="primary")
+    add_btn = st.sidebar.button("Add", use_container_width=True, type="primary")
 
     if add_btn:
         if new_symbol:
