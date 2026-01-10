@@ -791,30 +791,44 @@ def main():
             # Update session state
             # === Generate chart with selected period ===
             fig = fetch_stock_chart(sym, selected_period, selected_interval,index_choice)
-
             if fig:
                 if is_mobile():
-                    # Mobile: force static PNG (no kaleido needed on client)
+                    # Mobile: Force static PNG (no kaleido client issues)
                     try:
-                        # Generate image server-side (kaleido runs on your server, not client)
+                        # Server-side PNG export (kaleido runs here, not in Safari)
                         img_bytes = fig.to_image(
                             format="png",
-                            width=1000,          # mobile-friendly size
-                            height=1400            # sharp retina quality
+                            width=900,          # Good for mobile portrait
+                            height=1400,
+                            scale=2             # Sharp on Retina displays
                         )
                         st.image(
                             img_bytes,
-                            use_container_width=True,   # ← Fixed: modern parameter
-                            caption="Static chart (mobile view – zoom disabled for better experience)"
+                            use_container_width=True,
+                            caption="Static chart (mobile view – pinch/drag disabled)"
+                        )
+                        # Optional: Download button
+                        st.download_button(
+                            "Download chart PNG",
+                            data=img_bytes,
+                            file_name=f"{sym}_chart.png",
+                            mime="image/png"
                         )
                     except Exception as e:
-                        st.warning(f"Static image failed: {e}. Showing interactive version.")
-                        st.plotly_chart(fig, config=get_plotly_mobile_config(), use_container_width=True, height=1300)
+                        st.warning(f"PNG export failed: {e}. Showing limited interactive version.")
+                        # Fallback with max disabled interactions
+                        config = {
+                            "scrollZoom": False,
+                            "dragMode": False,
+                            "displayModeBar": False,
+                            "responsive": True
+                        }
+                        st.plotly_chart(fig, config=config, use_container_width=True, height=1300)
                 else:
                     # Desktop: full interactive
-                    st.plotly_chart(fig, config={"responsive": True, "displayModeBar": True}, use_container_width=True, height=1300)
+                    st.plotly_chart(fig, use_container_width=True, height=1300)
             else:
-                st.warning("No chart data available.")
+                st.warning("No chart data available for this timeframe.")
     with tabs[1]:    
         df2 = fetch_news(st.session_state.selected_symbol)
         if df2 is not None and not df2.empty:
