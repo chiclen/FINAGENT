@@ -36,6 +36,27 @@ def get_latest_update_time():
         latest_time = datetime.fromisoformat(result.replace('Z', '+00:00')).astimezone(us_tz)
         return latest_time.strftime("%d-%m-%y %H:%M:%S")
     return "No updates found in the database."
+# ------------Index chart
+# ——— ADD INDEX OVERLAYS (S&P 500 & Nasdaq) ———
+def add_index_overlay(fig, df_main, index_ticker, name, color, visible, period, interval, indexRow):
+    try:
+        index_data = yf.Ticker(index_ticker).history(period, interval)
+        if not index_data.empty:
+            # Normalize to % change from first value (for overlay)
+            #index_data['Pct_Change'] = (index_data['Close'] / index_data['Close'].iloc[0] - 1) * 100
+            
+            # Resample to match main df index if needed
+            #index_data = index_data.reindex(df_main.index, method='nearest')
+            
+            fig.add_trace(go.Scatter(
+                x=index_data.index,
+                y=index_data['Close'],  # Shift to match stock scale approx
+                name=name,
+                line=dict(color=color, width=2),
+                visible=visible  # 'legendonly' or False to hide initially
+            ), row=indexRow, col=1)
+    except:
+        pass  # Silent fail if index data unavailable
 
 # ——————————— ANIMATED GIF CHART FOR MOBILE (Using ChartGif.com) ———————————
 def get_animated_gif_chart(symbol, timeframe):
@@ -51,6 +72,7 @@ def is_mobile():
     user_agent = st.context.headers.get("User-Agent", "").lower()
     mobile_keywords = ["iphone", "ipad", "android", "mobile", "silk", "kindle", "windows phone"]
     return any(keyword in user_agent for keyword in mobile_keywords)
+    #return True
 
 def disable_chart_zoom():
     if is_mobile():
@@ -206,17 +228,17 @@ def fetch_news(symbol):
     except Exception as e:
         return None
     
-def fetch_stock_chart(symbol, period1, interval1):
+def fetch_stock_chart(symbol, period1, interval1, index_choice1):
     try:
+        #print(f"Interval:{interval1}, Period: {period1}")
         ticker = yf.Ticker(symbol)
         df = ticker.history(period=period1, interval=interval1)
         if df.empty:
             st.error(f"No historical data returned for {symbol}.")
             return None
-
+        
         # ——— Detect mobile ———
         mobile = is_mobile()
-
         # ——— Always calculate indicators that both versions need ———
         df['MA5']  = df['Close'].rolling(5).mean()
         df['MA20'] = df['Close'].rolling(20).mean()
@@ -236,114 +258,121 @@ def fetch_stock_chart(symbol, period1, interval1):
         rs    = gain / loss
         df['RSI'] = 100 - (100 / (1 + rs))
 
-        # ——————————————— MOBILE VERSION (simple & clean) ———————————————
-        if mobile:
-            fig = make_subplots(
-                rows=4, cols=1,
-                row_heights=[0.55, 0.15, 0.15, 0.15],
-                shared_xaxes=True,
-                vertical_spacing=0.02,
-                subplot_titles=(symbol, "Volume", "MACD", "RSI")
-            )
+        # ← AVERAGE TURNOVER LINE
+        # Auto-choose window based on timeframe
+        if interval1 in ["15m", "30m", "60m"]:
+            window = 50
+        elif period1 in ["5d", "1mo", "3mo"]:
+            window = 20
+        elif period1 in ["6mo", "1y"]:
+            window = 50
+        else:  # 2y, 5y, max
+            window = 200
 
-            # Candlestick + MAs
-            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'],
-                                         low=df['Low'], close=df['Close'], name="Price"), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df['MA5'],  name="MA5",  line=dict(color="orange")), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], name="MA20", line=dict(color="green")),  row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df['MA50'], name="MA50", line=dict(color="blue")),   row=1, col=1)
+        # Safe window: never larger than available non-NaN data
+        available_volume = df['Volume'].dropna()
+        safe_window = min(window, len(available_volume))
 
-            # Volume
-            fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name="Volume",
-                                 marker_color='rgba(128,128,128,0.5)'), row=2, col=1)
-
-            # MACD
-            fig.add_trace(go.Scatter(x=df.index, y=df['MACD'],   name="MACD",   line=dict(color="blue")), row=3, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df['Signal'], name="Signal", line=dict(color="red")),   row=3, col=1)
-            fig.add_trace(go.Bar(x=df.index, y=df['Histogram'], name="Hist", marker_color="gray"),         row=3, col=1)
-
-            # RSI
-            fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], name="RSI", line=dict(color="purple")), row=4, col=1)
-            fig.add_hline(y=70, line_dash="dash", line_color="red",   row=4, col=1)
-            fig.add_hline(y=30, line_dash="dash", line_color="green", row=4, col=1)
-
-            fig.update_layout(
-                height=700,
-                showlegend=False,
-                xaxis_rangeslider_visible=False,
-                margin=dict(l=10, r=10, t=50, b=10),
-                template="plotly_white"
-            )
-            return fig
-
-        # ——————————————— DESKTOP VERSION (your original full chart) ———————————————
+        if safe_window >= 1:
+            df['Avg_Volume'] = df['Volume'].rolling(window=safe_window, min_periods=1).mean()
         else:
+            df['Avg_Volume'] = None  # no data
+         
+        # ——————————————— MOBILE VERSION (simple & clean) ———————————————
+        epsRow = 1
+        indexRow = 2
+        symbolRow = 2
+        volumeRow = 3
+        macdRow = 4
+        rsiRow = 5
+        if not mobile:
             # —— All the extra indicators you had before (Bollinger, squeeze, signals) ——
-            df['BB_Mid']  = df['Close'].rolling(20).mean()
-            df['BB_Std']  = df['Close'].rolling(20).std()
-            df['BB_Upper']= df['BB_Mid'] + df['BB_Std']*2
-            df['BB_Lower']= df['BB_Mid'] - df['BB_Std']*2
-            df['BB_Width']= (df['BB_Upper'] - df['BB_Lower']) / df['BB_Mid']
-            df['BB_Squeeze'] = df['BB_Width'] < 0.04
-            df['BB_Buy']  = df['Close'] <= df['BB_Lower']
-            df['BB_Sell'] = df['Close'] >= df['BB_Upper']
+            if "None" in index_choice1: 
+                fig = make_subplots(
+                    rows=5, cols=1,
+                    row_heights=[0.15, 0.6, 0.4, 0.20, 0.10],# Price 40%, Volume 30%, MACD 15%, RSI 15%
+                    shared_xaxes=True,
+                    vertical_spacing=0.03,   
+                    subplot_titles=[f"{symbol} Quarterly EPS", "{symbol} Candle Stick", "Volume", "MACD", "RSI"]
+                )
+            else:
 
-            fig = make_subplots(
-                rows=4, cols=1,
-                row_heights=[0.5, 0.15, 0.2, 0.15],
-                shared_xaxes=True,
-                vertical_spacing=0.03,
-                subplot_titles=[f"{symbol} Technical Analysis", "Volume", "MACD", "RSI"]
-            )
+                if "S&P 500" in index_choice1:
+                    name = "Index: S&P 500"
+                
+                if "Nasdaq" in index_choice1:
+                    name =  "Index: Nasdaq"
 
+                fig = make_subplots(
+                    rows=6, cols=1,
+                    row_heights=[0.15, 0.3, 0.6, 0.2, 0.2, 0.2],# index 30% , Price 40%, Volume 20%, MACD 5%, RSI 5%
+                    shared_xaxes=True,
+                    vertical_spacing=0.03,   
+                    subplot_titles=[f"{symbol} Quarterly EPS", name,"Technical Analysis", "Volume", "MACD", "RSI"]
+                )
+
+                # index 
+                epsRow = 1
+                indexRow = 2
+                symbolRow = 3
+                volumeRow = 4
+                macdRow = 5
+                rsiRow = 6
+
+                if "S&P 500" in index_choice1:
+                    add_index_overlay(fig, df, "^GSPC", "S&P 500", "gray", True, period1, interval1, indexRow)
+                if "Nasdaq" in index_choice1:
+                    add_index_overlay(fig, df, "^IXIC", "Nasdaq", "purple", True, period1, interval1, indexRow)
+
+
+            # ─── Synchronized EPS Chart ─────────────────────────────────────
+            # Get the exact date range from the main chart's data
+            get_quarterly_eps_overlay(fig, symbol, period1, interval1, epsRow)
             # Candlestick
-            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'],
-                                         low=df['Low'], close=df['Close'], name='Candlestick'), row=1, col=1)
+            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'],low=df['Low'], close=df['Close'], name='Candlestick'), row=symbolRow, col=1)
 
             # Moving Averages
             for ma, col in zip(['MA5','MA20','MA50'], ['orange','green','blue']):
-                fig.add_trace(go.Scatter(x=df.index, y=df[ma], name=ma, line=dict(color=col, width=1)), row=1, col=1)
+                fig.add_trace(go.Scatter(x=df.index, y=df[ma], name=ma, line=dict(color=col, width=1)), row=symbolRow, col=1)
+                # Volume + Average Line
 
-            # Bollinger Bands
-            fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], name='BB Upper', line=dict(color='gray', dash='dash')), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], name='BB Lower', line=dict(color='gray', dash='dash'),
-                                     fill='tonexty', fillcolor='rgba(128,128,128,0.2)'), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df['BB_Mid'], name='BB Mid', line=dict(color='black')), row=1, col=1)
-
-            # Buy/Sell signals
-            buy  = df[df['BB_Buy']]
-            sell = df[df['BB_Sell']]
-            fig.add_trace(go.Scatter(x=buy.index,  y=buy['Close'],  mode='markers', name='BB Buy',
-                                     marker=dict(symbol='triangle-up', size=10, color='green')), row=1, col=1)
-            fig.add_trace(go.Scatter(x=sell.index, y=sell['Close'], mode='markers', name='BB Sell',
-                                     marker=dict(symbol='triangle-down', size=10, color='red')), row=1, col=1)
-
-            # Squeeze shading
-            squeeze = df[df['BB_Squeeze']]
-            if not squeeze.empty:
-                fig.add_shape(type="rect", x0=squeeze.index.min(), x1=squeeze.index.max(),
-                              y0=0, y1=1, fillcolor="yellow", opacity=0.3, layer="below", line_width=0, row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['Avg_Volume'], name="Avg Volume", line=dict(color='black', width=2)), row=volumeRow, col=1)
 
             # Volume
-            fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume',
-                                 marker_color='rgba(128,128,128,0.5)'), row=2, col=1)
+            # Create color list: green if up day, red if down day
+            colors = ['green' if row['Close'] >= row['Open'] else 'red' 
+                    for _, row in df.iterrows()]
+
+            # Add volume bars with matching colors
+            fig.add_trace(go.Bar(
+                x=df.index,
+                y=df['Volume'],
+                name='Volume',
+                marker_color=colors,      # ← THIS IS THE KEY LINE
+                marker_line_width=0,
+                opacity=0.8
+            ), row=volumeRow, col=1)  # or your volume row number
 
             # MACD
-            fig.add_trace(go.Scatter(x=df.index, y=df['MACD'],   name='MACD',   line=dict(color='blue')), row=3, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df['Signal'], name='Signal', line=dict(color='red')),   row=3, col=1)
-            fig.add_trace(go.Bar(x=df.index, y=df['Histogram'], name='Histogram', marker_color='gray'), row=3, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['MACD'],   name='MACD',   line=dict(color='blue')), row=macdRow, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['Signal'], name='Signal', line=dict(color='red')),   row=macdRow, col=1)
+            fig.add_trace(go.Bar(x=df.index, y=df['Histogram'], name='Histogram', marker_color='gray'), row=macdRow, col=1)
 
             # RSI
-            fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], name='RSI', line=dict(color='purple')), row=4, col=1)
-            fig.add_hline(y=70, line_dash="dash", line_color="red",   row=4, col=1)
-            fig.add_hline(y=30, line_dash="dash", line_color="green", row=4, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], name='RSI', line=dict(color='purple')), row=rsiRow, col=1)
+            fig.add_hline(y=70, line_dash="dash", line_color="red",   row=rsiRow, col=1)
+            fig.add_hline(y=30, line_dash="dash", line_color="green", row=rsiRow, col=1)
+
+            
+            # adding index
+            # Then in chart building:
 
             fig.update_layout(
                 title=f"{symbol} • {period1} • {interval1}",
-                height=800,
+                height=1200,
                 showlegend=True,
                 xaxis_rangeslider_visible=False,
-                margin=dict(l=40, r=40, t=60, b=40),
+                margin=dict(l=20, r=80, t=60, b=40),
                 template='plotly'
             )
             fig.update_xaxes(rangeslider_visible=False)
@@ -352,7 +381,69 @@ def fetch_stock_chart(symbol, period1, interval1):
     except Exception as e:
         st.error(f"Failed to fetch or process chart for {symbol}: {e}")
         return None
-            
+
+
+def get_quarterly_eps_overlay(fig, symbol, period1, interval1, epsRow):
+    """
+    Fetches quarterly reported EPS data using yfinance.
+    Returns a sorted DataFrame with datetime index and 'EPS' column.
+    """
+    try:
+        ticker = yf.Ticker(symbol)
+        main_df = ticker.history(period=period1, interval=interval1)
+        main_date_range = (main_df.index.min(), main_df.index.max()) if not main_df.empty else None
+        eps_df = main_df
+
+        # Primary method: earnings_dates (includes reported EPS)
+        if hasattr(ticker, 'earnings_dates') and ticker.earnings_dates is not None:
+            temp = ticker.earnings_dates
+            #print (f"temp:{temp}")
+            if 'Reported EPS' in temp.columns:
+                eps_df = temp[['Reported EPS']].dropna().rename(columns={'Reported EPS': 'EPS'})
+
+        # Fallback: quarterly_earnings (older method)
+        if eps_df is None or eps_df.empty:
+            if hasattr(ticker, 'quarterly_earnings') and ticker.quarterly_earnings is not None:
+                eps_df = ticker.quarterly_earnings[['Earnings']].rename(columns={'Earnings': 'EPS'})
+
+        if eps_df is None or eps_df.empty:
+            st.warning(f"No quarterly EPS data available for {symbol}.")
+            return pd.DataFrame()
+        else:
+            # 3. IMPORTANT: Filter EPS to the same period as main chart (if you want control)
+            if main_date_range:
+                start, end = main_date_range
+                eps_df = eps_df[(eps_df.index >= start) & (eps_df.index <= end)]
+                #print(f"Filtered EPS rows: {len(eps_df)}")
+
+        # Clean index: remove timezone if present and sort
+        if eps_df.index.tz is not None:
+            eps_df.index = eps_df.index.tz_localize(None)
+        eps_df = eps_df.sort_index()
+
+        if eps_df.empty:
+            st.info("No EPS data to display.")
+            return None
+
+        #print(f"eps_df:{eps_df}")
+        fig.add_trace(
+            go.Scatter(
+                x=eps_df.index,
+                y=eps_df['EPS'],
+                mode='lines+markers+text',
+                name='Quarterly EPS',
+                line=dict(color='#2ca02c', width=4, dash='solid'),
+                marker=dict(size=8, symbol='circle', color='white', line=dict(width=3, color='#2ca02c')),
+                text=[f"{val:.2f}" for val in eps_df['EPS']],
+                textposition="top center",
+                textfont=dict(size=8, color="#2ca02c"),
+                hovertemplate='%{x|%Y-%m-%d}<br>EPS: %{y:.2f}<extra></extra>'
+            ), row = epsRow, col=1
+        )
+    except Exception as e:
+        st.error(f"Failed to fetch company info for {symbol}: {e}")
+    return None
+
 @st.cache_data(ttl=7200)
 def fetch_company_info(symbol):
     if (symbol== ""):
@@ -451,7 +542,7 @@ def main():
         disabled=False
     )
     view_type = st.sidebar.radio(
-        "View Mode", ["Close to High", "Close to Low", "Both"],
+        "View Mode", ["Close to High", "Close to Low"],
         disabled=False
     )
     st.sidebar.markdown("---")  # separator
@@ -463,7 +554,7 @@ def main():
         key="add_stock_input"
     )
 
-    add_btn = st.sidebar.button("Add", use_container_width=True, type="primary")
+    add_btn = st.sidebar.button("Add", width="stretch", type="primary")
 
     if add_btn:
         if new_symbol:
@@ -638,21 +729,54 @@ def main():
 
                 if 'chart_period' not in st.session_state:
                     st.session_state.chart_period = "Day"
+
+                selected_period = st.radio(
+                    "Time Period",
+                    options=period_options,
+                    index=1,  # default = "5 Years" (change as needed)
+                    horizontal=True,
+                    label_visibility="collapsed"  # hides the label above
+                )
             else: 
-                # === NEW: Dropdown for time period ===
+                st.subheader(f"Chart — {st.session_state.selected_symbol}")
+
                 period_options = [
-                    "15 Minutes",
-                    "30 Minutes",
-                    "1 Week",
-                    "1 Month",
-                    "3 Months",
-                    "6 Months",
-                    "1 Year",
-                    "5 Years",
-                    "10 Years",
-                    "All Available"
+                    "15 Minutes", "30 Minutes", "1 Week", "1 Month", "3 Months",
+                    "6 Months", "1 Year", "5 Years", "10 Years", "All Available"
                 ]
 
+                # Horizontal buttons — looks great on mobile & desktop
+                selected_period = st.radio(
+                    "Time Period",
+                    options=period_options,
+                    index=7,  # default = "5 Years" (change as needed)
+                    horizontal=True,
+                    label_visibility="collapsed"  # hides the label above
+                )
+
+                # Optional: Add custom styling for larger buttons
+                st.markdown("""
+                <style>
+                div.row-widget.stRadio > div {
+                    flex-direction: row;
+                    gap: 10px;
+                }
+                div.row-widget.stRadio > div label {
+                    background-color: #f0f2f6;
+                    padding: 10px 20px;
+                    border-radius: 8px;
+                    border: 1px solid #d0d7de;
+                    font-weight: 500;
+                }
+                div.row-widget.stRadio > div label[data-checked="true"] {
+                    background-color: #1f77b4 !important;
+                    color: white !important;
+                    border-color: #1f77b4;
+                }
+                </style>
+                """, unsafe_allow_html=True)
+                                
+                # === NEW: Dropdown for time period ===
                 # Map user-friendly names to yfinance parameters
                 period_map = {
                     "15 Minutes": ("1d", "15m", "i"),
@@ -670,14 +794,14 @@ def main():
                 if 'chart_period' not in st.session_state:
                     st.session_state.chart_period = "5 Years"
 
-            period = st.session_state.chart_period
+                index_choice = st.radio(
+                    "Compare With",
+                    options=["None", "S&P 500", "Nasdaq"],
+                    index=0,
+                    horizontal=True
+                )
 
-            selected_period = st.selectbox(
-                "Chart Timeframe",
-                options=period_options,
-                index=period_options.index(st.session_state.chart_period),
-                key="period_selector"
-            )
+            period = st.session_state.chart_period
 
             selected_period, selected_interval , chart_index= period_map.get(selected_period)
             # ——————— MOBILE: Show Animated GIF ———————
@@ -692,15 +816,12 @@ def main():
             else:
                 # Update session state
                 # === Generate chart with selected period ===
-                fig = fetch_stock_chart(sym, selected_period, selected_interval)
+                fig = fetch_stock_chart(sym, selected_period, selected_interval,index_choice)
 
                 if fig:
                     st.plotly_chart(fig, width="stretch")
                 else:
                     st.warning("No chart data available for this timeframe.")
-        else:
-            st.info("Select a stock to view its chart.")
-    
     with tabs[1]:    
         df2 = fetch_news(st.session_state.selected_symbol)
         if df2 is not None and not df2.empty:
