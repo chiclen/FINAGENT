@@ -6,6 +6,8 @@ import yfinance as yf
 import dateutil.parser  # For parsing ISO date string
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.io as pio
+
 import time
 import subprocess
 import os
@@ -62,8 +64,8 @@ def add_index_overlay(fig, df_main, index_ticker, name, color, visible, period, 
 def is_mobile():
     user_agent = st.context.headers.get("User-Agent", "").lower()
     mobile_keywords = ["iphone", "ipad", "android", "mobile", "silk", "kindle", "windows phone"]
-    return any(keyword in user_agent for keyword in mobile_keywords)
-    #return True
+    #return any(keyword in user_agent for keyword in mobile_keywords)
+    return True
     #return False
 
 def disable_chart_zoom():
@@ -796,23 +798,19 @@ def main():
                     # Mobile: Force static PNG (no kaleido client issues)
                     try:
                         # Server-side PNG export (kaleido runs here, not in Safari)
+                        pio.templates.default = "plotly"
+                        img_bytes = pio.to_image(fig, format="png", engine="auto", width=900, height=1400, scale=2)
+
                         img_bytes = fig.to_image(
                             format="png",
                             width=900,          # Good for mobile portrait
                             height=1400,
-                            scale=2             # Sharp on Retina displays
+                            scale=0             # Sharp on Retina displays
                         )
                         st.image(
                             img_bytes,
                             use_container_width=True,
                             caption="Static chart (mobile view – pinch/drag disabled)"
-                        )
-                        # Optional: Download button
-                        st.download_button(
-                            "Download chart PNG",
-                            data=img_bytes,
-                            file_name=f"{sym}_chart.png",
-                            mime="image/png"
                         )
                     except Exception as e:
                         st.warning(f"PNG export failed: {e}. Showing limited interactive version.")
