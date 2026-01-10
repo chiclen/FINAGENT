@@ -3,4 +3,5 @@ streamlit>=1.10.0
 pandas
 yfinance
 plotly
+lxml
 python-dateutil
