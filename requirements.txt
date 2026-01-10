@@ -6,3 +6,4 @@ kaleido>=1.0.0                     # Plotly static image export (PNG/JPEG)
 lxml>=5.0.0                        # Required for yfinance company info parsing
 python-dateutil>=2.8.0             # Date parsing (used with dateutil.parser)
 pytz>=2023.3                       # Timezone handling
+matplotlib
