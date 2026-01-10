@@ -5,4 +5,3 @@ yfinance
 plotly
 lxml
 python-dateutil
-kaleido>=1.0.0
