@@ -64,8 +64,8 @@ def add_index_overlay(fig, df_main, index_ticker, name, color, visible, period, 
 def is_mobile():
     user_agent = st.context.headers.get("User-Agent", "").lower()
     mobile_keywords = ["iphone", "ipad", "android", "mobile", "silk", "kindle", "windows phone"]
-    return any(keyword in user_agent for keyword in mobile_keywords)
-    #return True
+    #return any(keyword in user_agent for keyword in mobile_keywords)
+    return True
     #return False
 
 def disable_chart_zoom():
@@ -802,19 +802,19 @@ def main():
                             format="png",
                             width=900,           # Mobile-friendly portrait
                             height=1400,
-                            scale=2              # Sharp on Retina
+                            scale=0              # Sharp on Retina
                         )
                         st.image(
                             img_bytes,
                             use_container_width=True,
-                            caption="Static chart (mobile view – no zoom/drag)"
+                            caption="Static chart (mobile view no zoom/drag)"
                         )
                     except Exception as e:
                         st.warning(f"Static PNG failed: {e}. Showing limited interactive version.")
                         config = get_plotly_mobile_config()
                         st.plotly_chart(fig, config=config, use_container_width=True, height=1300)               
                 else:
-                        # Desktop: full interactive
+                    # Desktop: full interactive
                     st.plotly_chart(fig, use_container_width=True, height=1300)
             else:
                 st.warning("No chart data available for this timeframe.")
