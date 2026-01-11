@@ -2,7 +2,7 @@ streamlit>=1.30.0                  # Core Streamlit framework
 pandas>=2.0.0                      # Data manipulation
 yfinance>=0.2.40                   # Yahoo Finance data
 plotly>=5.18.0                     # Interactive charts
-kaleido>=1.0.1                     # Plotly static image export (PNG/JPEG)
+kaleido                     # Plotly static image export (PNG/JPEG)
 lxml>=5.0.0                        # Required for yfinance company info parsing
 python-dateutil>=2.8.0             # Date parsing (used with dateutil.parser)
 pytz>=2023.3                       # Timezone handling
