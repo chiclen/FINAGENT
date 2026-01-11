@@ -481,6 +481,14 @@ def fetch_company_info(symbol):
 def main():
     # Add CSS for minimizing symbol column and button visibility
 
+
+    # Very important for Streamlit Cloud / containers
+    pio.kaleido.scope.chromium_args = (
+        "--headless",
+        "--no-sandbox",
+        "--single-process",
+        "--disable-gpu"
+    )
     st.session_state.selected_symbol = ""
     # Layout
     st.subheader("Stock Analyzer")
