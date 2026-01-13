@@ -7,3 +7,6 @@ lxml>=5.0.0                        # Required for yfinance company info parsing
 python-dateutil>=2.8.0             # Date parsing (used with dateutil.parser)
 pytz>=2023.3                       # Timezone handling
 finvizfinance                      # finviz library
+openpyxl>=3.1.0            # Required engine for pandas .to_excel() with .xlsx format
+# Optional but useful for nicer tables / performance
+numpy>=1.24.0              # Often pulled in by pandas anyway, but good to have
