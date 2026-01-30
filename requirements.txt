@@ -1,12 +1,27 @@
-streamlit>=1.40.0<1.43.0                  # Core Streamlit framework
-pandas>=2.0.0                      # Data manipulation
-yfinance>=0.2.40                   # Yahoo Finance data
-plotly==5.24.1                     # Interactive charts
-kaleido==0.2.1                     #Plotly static image export (PNG/JPEG)
-lxml>=5.0.0                        # Required for yfinance company info parsing
-python-dateutil>=2.8.0             # Date parsing (used with dateutil.parser)
-pytz>=2023.3                       # Timezone handling
-finvizfinance                      # finviz library
-openpyxl>=3.1.0            # Required engine for pandas .to_excel() with .xlsx format
-# Optional but useful for nicer tables / performance
-numpy>=1.24.0              # Often pulled in by pandas anyway, but good to have
+# Core web framework
+streamlit>=1.38.0
+
+# Data handling
+pandas>=2.2.0
+numpy>=1.26.0
+
+# Data source
+yfinance>=0.2.40
+
+# Plotting
+plotly>=5.22.0
+
+# Used for date parsing (yfinance news dates)
+python-dateutil>=2.8.2
+
+# Timezone support (you are using pytz in app.py)
+pytz>=2024.1
+
+# Optional but recommended for better performance & stability
+# (especially when deploying to Streamlit Community Cloud)
+pyarrow>=15.0      # faster parquet / arrow support in pandas
+tornado>=6.4       # helps with websocket stability on cloud
+
+# Only needed if you want to export static images on server/cloud
+# (you are already using kaleido in the code)
+kaleido>=0.2.1
