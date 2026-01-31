@@ -40,7 +40,7 @@ def get_latest_update_time():
         latest_time = datetime.fromisoformat(result.replace('Z', '+00:00')).astimezone(us_tz)
         return latest_time.strftime("%d-%m-%y %H:%M:%S")
     return "No updates found in the database."
-# ------------Index chart
+
 # ——— ADD INDEX OVERLAYS (S&P 500 & Nasdaq) ———
 def add_index_overlay(fig, df_main, index_ticker, name, color, visible, stock, indexRow):
     try:
@@ -103,13 +103,15 @@ def load_stocks_data():
     """Load all stocks data from the database into a DataFrame."""
     conn = sqlite3.connect(DB_FILE)
     query = """
-        SELECT symbol, company_name, category, current_price, yesterday_close,
+        SELECT symbol, company_name, sector, industry, category, current_price, yesterday_close,
                week_high_52, week_low_52
         FROM Stocks
+        Where type = 'EQUITY'
         ORDER BY symbol ASC
     """
     try:
         df = pd.read_sql_query(query, conn)
+        
     except Exception as e:
         st.error(f"Database query failed: {e}")
         conn.close()
@@ -124,6 +126,8 @@ def load_stocks_data():
                 st.error("Column 'symbol' not found in database. Available columns: " + ", ".join(df.columns))
                 return pd.DataFrame()
             
+            df['sector'] = df['sector']
+            df['industry'] = df['industry']
             df['company_name'] = df['company_name']
             invalid_rows = df[df[['current_price', 'week_high_52', 'week_low_52']].isna().any(axis=1)]
             if not invalid_rows.empty:
@@ -404,7 +408,7 @@ def main():
     df = df.rename(columns=column_mapping)
     
     # Ensure these columns exist (create if missing)
-    for col in ['symbol', 'company_name', 'current_price', 'week_high_52', 
+    for col in ['symbol', 'company_name', 'sector', 'industry', 'current_price', 'week_high_52', 
                 'week_low_52', 'dist_to_high_pct', 'dist_to_low_pct', 'last_updated']:
         if col not in df.columns:
             df[col] = None  # or appropriate default
@@ -412,6 +416,8 @@ def main():
     # Column config with progress bars
     column_config = {
         'symbol': st.column_config.TextColumn("Symbol", width=1),
+        'sector': st.column_config.TextColumn("Sector", width=1),
+        'industry': st.column_config.TextColumn("Industry", width=1),        
         'current_price': st.column_config.NumberColumn("Price", format="$%.2f", width=1),
         'week_high_52': st.column_config.NumberColumn("52W High", format="$%.2f", width=1),
         'week_low_52': st.column_config.NumberColumn("52W Low", format="$%.2f", width=1),
@@ -497,7 +503,7 @@ def main():
             watch_df = df[df['symbol'].str.upper().isin(valid_symbols)].copy()
 
             # Ensure all required columns exist
-            required_cols = ["symbol",  "current_price", 
+            required_cols = ["symbol",  "sector", "industry", "current_price", 
                             "dist_to_high_pct", "dist_to_low_pct","company_name"]
             for col in required_cols:
                 if col not in watch_df.columns:
@@ -507,7 +513,7 @@ def main():
             watch_df = watch_df.sort_values("dist_to_high_pct", ascending=True)
 
             # Final display columns
-            display_cols = ["symbol",  "current_price",
+            display_cols = ["symbol",  "sector", "industry", "current_price",
                             "dist_to_high_pct", "dist_to_low_pct", "company_name"]
 
             st.dataframe(
@@ -515,6 +521,8 @@ def main():
                 hide_index=True,
                 column_config={
                     "symbol": st.column_config.TextColumn("Symbol", width="small"),
+                    "sector": st.column_config.TextColumn("Sector", width="small"),
+                    "industry": st.column_config.TextColumn("Industry", width="small"),
                     "current_price": st.column_config.NumberColumn("Price", format="$%.2f"),
                     "dist_to_high_pct": st.column_config.NumberColumn("% from High", format="%.1f%%"),
                     "dist_to_low_pct": st.column_config.NumberColumn("% from Low", format="%.1f%%"),
@@ -556,7 +564,7 @@ def main():
             if not close_to_high.empty:
                 st.subheader(f"{cap} Stocks Close to 52-Week High ({latest_time})")
                 st.subheader(f"(≤ {threshold}%)")
-                display_columns = ['symbol', 'current_price', 'week_high_52', 'dist_to_high_pct', 'company_name']
+                display_columns = ['symbol', 'sector','industry', 'current_price', 'week_high_52', 'dist_to_high_pct', 'company_name']
                 selected_row = st.dataframe(
                     close_to_high[display_columns],
                     column_config={k: v for k, v in column_config.items() if k in display_columns},
@@ -573,7 +581,7 @@ def main():
             if not close_to_low.empty:
                 st.subheader(f"{cap} Stocks Close to 52-Week Low ({latest_time})")
                 st.subheader(f"(≤ {threshold}%)")
-                display_columns = ['symbol', 'current_price', 'week_low_52', 'dist_to_low_pct', 'company_name']
+                display_columns = ['symbol', 'sector', 'industry', 'current_price', 'week_low_52', 'dist_to_low_pct', 'company_name']
                 selected_row = st.dataframe(
                     close_to_low[display_columns],
                     column_config={k: v for k, v in column_config.items() if k in display_columns},
@@ -590,7 +598,7 @@ def main():
             if not close_to_high.empty:
                 st.subheader(f"{cap} Stocks Close to 52-Week High ({latest_time})")
                 st.subheader(f"(≤ {threshold}%)")
-                display_columns = ['symbol', 'current_price', 'week_high_52', 'dist_to_high_pct', 'company_name']
+                display_columns = ['symbol', 'sector', 'industry', 'current_price', 'week_high_52', 'dist_to_high_pct', 'company_name']
                 selected_row = st.dataframe(
                     close_to_high[display_columns],
                     column_config={k: v for k, v in column_config.items() if k in display_columns},
@@ -604,7 +612,7 @@ def main():
             if not close_to_low.empty:
                 st.subheader(f"{cap} Stocks Close to 52-Week Low ({latest_time})")
                 st.subheader(f"(≤ {threshold}%)")
-                display_columns = ['symbol', 'current_price', 'week_low_52', 'dist_to_low_pct', 'company_name']
+                display_columns = ['symbol', 'sector', 'industry', 'current_price', 'week_low_52', 'dist_to_low_pct', 'company_name']
                 selected_row = st.dataframe(
                     close_to_low[display_columns],
                     column_config={k: v for k, v in column_config.items() if k in display_columns},
