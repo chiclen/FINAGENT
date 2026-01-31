@@ -28,8 +28,11 @@ def init_db():
     c.execute('''
         CREATE TABLE IF NOT EXISTS stocks (
             symbol TEXT PRIMARY KEY,
+            sector TEXT, 
+            industry TEXT,
             company_name TEXT,
             category TEXT,
+            type TEXT,
             last_updated TEXT,
             current_price REAL,
             yesterday_close REAL,
@@ -40,6 +43,13 @@ def init_db():
 
     c.execute('CREATE INDEX IF NOT EXISTS idx_symbol   ON stocks(symbol)')
     c.execute('CREATE INDEX IF NOT EXISTS idx_category ON stocks(category)')
+
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS watchlist (
+            symbol TEXT PRIMARY KEY
+        )
+    ''')
+
     conn.commit()
     conn.close()
     print(f"[{datetime.now()}] SQLite database 'stocks.db' ready (created if missing)")
@@ -178,7 +188,7 @@ def safe_float(value, default=None, strip_dollar=False):
         return result
     except ValueError:
         return default
-
+    
 def fetch_price_data(symbols, all_stocks,warning_log, new_record):
     desired_categories = ["Mega-Cap", "Large-Cap", "Mid-Cap", "Small-Cap or Below"]
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -187,23 +197,29 @@ def fetch_price_data(symbols, all_stocks,warning_log, new_record):
     error_count = 0
 
     # Split symbols into smaller batches
-    batch_size = 1000
+    batch_size = 500
     symbol_batches = [symbols[i:i + batch_size] for i in range(0, len(symbols), batch_size)]
 
     print(f"[{datetime.now()}] Processing {len(symbols)} symbols in {len(symbol_batches)} batches...")
-    j=0
     for batch_idx, batch in enumerate(symbol_batches):
         print(f"[{datetime.now()}] Fetching data for batch {batch_idx + 1}/{len(symbol_batches)} ({len(batch)} symbols)...")
         try:
             tickers = Ticker(batch, asynchronous=True)
             quote = tickers.price           
             summary_detail = tickers.summary_detail
+            profile_data = tickers.asset_profile
             # Process each symbol in the batch
             for symbol in tqdm(batch, desc=f"Processing batch {batch_idx + 1}", unit="stock"):
                 try:
-                    # Get metadata                   
-                    market_cap_raw = all_stocks[j].get('marketCap', '')
-                    
+                    # Get metadata              
+                    if isinstance(profile_data[symbol], str): 
+                        sector = ''
+                        industry = ''
+                    else:
+                        sector = profile_data[symbol].get('sector','')
+                        industry = profile_data[symbol].get('industry','')
+                    #market cap
+                    market_cap_raw = summary_detail[symbol].get('marketCap', '')  
                     market_cap = safe_float(market_cap_raw, default=None)
                     if market_cap is not None:
                         market_cap = round(market_cap, 2)
@@ -213,16 +229,28 @@ def fetch_price_data(symbols, all_stocks,warning_log, new_record):
                             skipped_count += 1
                             print(f"[{datetime.now()}] Skipped {symbol}: category {category} not in {desired_categories}")
                             continue
-
-                    
-                    lastsale_raw = all_stocks[j].get('lastsale', '')
-                    yesterday_close = safe_float(lastsale_raw, default=0.0, strip_dollar=True)
+                    previousclose_raw = summary_detail[symbol].get('previousClose', '')
+                    yesterday_close = safe_float(previousclose_raw, default=0.0, strip_dollar=True)
                     if yesterday_close != 0.0:  # Only round if not default
                         yesterday_close = round(yesterday_close, 2)
+
+                    #52 weeks high
+                    week_high_52 = summary_detail[symbol].get('fiftyTwoWeekHigh',0) 
+                    if week_high_52 is None or (isinstance(week_high_52, float) and np.isnan(week_high_52)):
+                            week_high_52 = 0.0
+                    else:
+                        week_high_52 = float(week_high_52)
+                    # 52 weeks low
+                    week_low_52 = summary_detail[symbol].get('fiftyTwoWeekLow', 0)
+                    if week_low_52 is None or (isinstance(week_low_52, float) and np.isnan(week_low_52)):
+                        week_low_52 = 0.0
+                    else:
+                        week_low_52 = float(week_low_52)
                     
+                    # market price
                     symbol_quote = quote.get(symbol, {})
                     # Check if quote is an error response
-                    if  symbol_quote == "Invalid Crumb":
+                    if  isinstance(symbol_quote , str):
                         continue
                     
                     current_price = symbol_quote.get('regularMarketPrice', 0) 
@@ -230,38 +258,26 @@ def fetch_price_data(symbols, all_stocks,warning_log, new_record):
                             current_price = 0.0
                     else:
                         current_price = float(current_price)
+                    
+                    type = symbol_quote.get('quoteType','')
                     # 
                     #company_name = all_stocks[j].get('name', '')
                     company_name=symbol_quote.get('shortName', '')
-                    #52 weeks high
-                    symbol_detail = summary_detail.get(symbol,{})
-                    week_high_52 = symbol_detail.get('fiftyTwoWeekHigh',0) 
-                    if week_high_52 is None or (isinstance(week_high_52, float) and np.isnan(week_high_52)):
-                            week_high_52 = 0.0
-                    else:
-                        week_high_52 = float(week_high_52)
-                    # 52 weeks low
-                    week_low_52 = symbol_detail.get('fiftyTwoWeekLow', 0)
-                    if week_low_52 is None or (isinstance(week_low_52, float) and np.isnan(week_low_52)):
-                            week_low_52 = 0.0
-                    else:
-                        week_low_52 = float(week_low_52)
-
-
                     # Store data in memory
                     stock_data.append({
                         'symbol': symbol.upper(),
+                        'sector': sector,
+                        'industry': industry,
                         'company_name': company_name,
                         'category': category,
+                        'type':type,
                         'last_updated': timestamp,
                         'current_price': float(current_price),
                         'yesterday_close': yesterday_close,
                         'week_high_52': week_high_52,
                         'week_low_52': week_low_52,
                     })
-                    print(f"[{datetime.now()}] Processed {symbol} ({len(stock_data)} valid stocks)")
-                    j=j+1
-
+                    #print(f"{symbol} , {company_name} , {type})")
                 except Exception as e:
                     error_count += 1
                     warning_log.append(f"Error processing {symbol} in batch {batch_idx + 1}: {str(e)}")
@@ -285,8 +301,11 @@ def fetch_price_data(symbols, all_stocks,warning_log, new_record):
             c.execute('''
                 CREATE TABLE IF NOT EXISTS stocks (
                     symbol TEXT PRIMARY KEY,
+                    sector TEXT, 
+                    industry TEXT,
                     company_name TEXT,
                     category TEXT,
+                    type TEXT,
                     last_updated TEXT,
                     current_price REAL,
                     yesterday_close REAL,
@@ -295,8 +314,8 @@ def fetch_price_data(symbols, all_stocks,warning_log, new_record):
                 )
             ''')
             c.executemany('''
-                INSERT OR REPLACE INTO stocks (symbol, company_name, category, last_updated, current_price, yesterday_close, week_high_52, week_low_52)
-                VALUES (:symbol, :company_name, :category, :last_updated, :current_price, :yesterday_close, :week_high_52, :week_low_52)
+                INSERT OR REPLACE INTO stocks (symbol, sector, industry, company_name, category, type, last_updated, current_price, yesterday_close, week_high_52, week_low_52)
+                VALUES (:symbol, :sector, :industry, :company_name, :category, :type, :last_updated, :current_price, :yesterday_close, :week_high_52, :week_low_52)
             ''', stock_data)
             conn.commit()
             print(f"[{datetime.now()}] Successfully inserted {len(stock_data)} records into stocks.db")
