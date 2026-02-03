@@ -37,7 +37,10 @@ def init_db():
             current_price REAL,
             yesterday_close REAL,
             week_high_52 REAL,
-            week_low_52 REAL
+            week_low_52 REAL, 
+            Turnover REAL, 
+            averageTurnover REAL, 
+            averageTurnover10Day REAL 
         )
     ''')
 
@@ -246,13 +249,33 @@ def fetch_price_data(symbols, all_stocks,warning_log, new_record):
                         week_low_52 = 0.0
                     else:
                         week_low_52 = float(week_low_52)
-                    
+                    # Volume 
+                    #regularMarketTurnover = summary_detail[symbol].get('regularMarketVolume', 0)
+                    averageTurnover = summary_detail[symbol].get('averageVolume', 0)
+                    if averageTurnover is None or (isinstance(averageTurnover, float) and np.isnan(averageTurnover)):
+                            averageTurnover = 0.0
+                    else:
+                        averageTurnover = float(averageTurnover)
+
+                    averageTurnover10Day = summary_detail[symbol].get('averageVolume10days', 0)
+                    if averageTurnover10Day is None or (isinstance(averageTurnover10Day, float) and np.isnan(averageTurnover10Day)):
+                            averageTurnover10Day = 0.0
+                    else:
+                        averageTurnover10Day = float(averageTurnover10Day)
+
+
                     # market price
                     symbol_quote = quote.get(symbol, {})
                     # Check if quote is an error response
                     if  isinstance(symbol_quote , str):
                         continue
-                    
+                    # turnover
+                    Turnover = symbol_quote.get('regularMarketVolume', 0) 
+                    if Turnover is None or (isinstance(Turnover, float) and np.isnan(Turnover)):
+                            Turnover = 0.0
+                    else:
+                        Turnover = float(Turnover)
+
                     current_price = symbol_quote.get('regularMarketPrice', 0) 
                     if current_price is None or (isinstance(current_price, float) and np.isnan(current_price)):
                             current_price = 0.0
@@ -276,6 +299,9 @@ def fetch_price_data(symbols, all_stocks,warning_log, new_record):
                         'yesterday_close': yesterday_close,
                         'week_high_52': week_high_52,
                         'week_low_52': week_low_52,
+                        'Turnover': Turnover, 
+                        'averageTurnover': averageTurnover, 
+                        'averageTurnover10Day': averageTurnover10Day 
                     })
                     #print(f"{symbol} , {company_name} , {type})")
                 except Exception as e:
@@ -310,12 +336,15 @@ def fetch_price_data(symbols, all_stocks,warning_log, new_record):
                     current_price REAL,
                     yesterday_close REAL,
                     week_high_52 REAL,
-                    week_low_52 REAL
+                    week_low_52 REAL, 
+                    Turnover REAL, 
+                    averageTurnover REAL, 
+                    averageTurnover10Day REAL
                 )
             ''')
             c.executemany('''
-                INSERT OR REPLACE INTO stocks (symbol, sector, industry, company_name, category, type, last_updated, current_price, yesterday_close, week_high_52, week_low_52)
-                VALUES (:symbol, :sector, :industry, :company_name, :category, :type, :last_updated, :current_price, :yesterday_close, :week_high_52, :week_low_52)
+                INSERT OR REPLACE INTO stocks (symbol, sector, industry, company_name, category, type, last_updated, current_price, yesterday_close, week_high_52, week_low_52, Turnover, averageTurnover, averageTurnover10Day)
+                VALUES (:symbol, :sector, :industry, :company_name, :category, :type, :last_updated, :current_price, :yesterday_close, :week_high_52, :week_low_52, :Turnover, :averageTurnover, :averageTurnover10Day)
             ''', stock_data)
             conn.commit()
             print(f"[{datetime.now()}] Successfully inserted {len(stock_data)} records into stocks.db")
