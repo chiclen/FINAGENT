@@ -103,7 +103,7 @@ def load_stocks_data():
     """Load all stocks data from the database into a DataFrame."""
     conn = sqlite3.connect(DB_FILE)
     query = """
-        SELECT symbol, company_name, sector, industry, category, current_price, yesterday_close,
+        SELECT symbol, company_name, sector, industry, category, current_price, Turnover, averageTurnover, yesterday_close,
                week_high_52, week_low_52
         FROM Stocks
         Where type = 'EQUITY'
@@ -118,7 +118,7 @@ def load_stocks_data():
         return pd.DataFrame()
     
     conn.close()
-    
+
     if not df.empty:
         try:
             df.columns = [col.strip() for col in df.columns]
@@ -129,10 +129,22 @@ def load_stocks_data():
             df['sector'] = df['sector']
             df['industry'] = df['industry']
             df['company_name'] = df['company_name']
-            invalid_rows = df[df[['current_price', 'week_high_52', 'week_low_52']].isna().any(axis=1)]
+            invalid_rows = df[df[['current_price', 'week_high_52', 'week_low_52', 'Turnover']].isna().any(axis=1)]
             if not invalid_rows.empty:
-                df = df.dropna(subset=['current_price', 'week_high_52', 'week_low_52'])
-            
+                df = df.dropna(subset=['current_price', 'week_high_52', 'week_low_52', 'Turnover'])
+
+            # After dropna(...)
+            df['Turnover']        = pd.to_numeric(df['Turnover'], errors='coerce')
+            df['averageTurnover'] = pd.to_numeric(df['averageTurnover'], errors='coerce')
+
+            import numpy as np
+
+            df['TurnoverRatio'] = np.where(
+                df['averageTurnover'] > 0,
+                np.round((df['Turnover'] / df['averageTurnover']) * 100, 2),
+                np.inf
+            )
+
             df['pct_to_high'] = df.apply(
                 lambda x: (x['current_price'] / x['week_high_52']) * 100 if x['week_high_52'] > 0 else float('inf'),
                 axis=1
@@ -391,11 +403,12 @@ def main():
         st.warning("No data found in the database or an error occurred. Run DataFeed first!")
         st.info("Click the 'Download Data from yahoo' button above to populate the database.")
         return
+
     # === FIX COLUMN NAMES ONCE AND FOR ALL ===
     df.columns = df.columns.str.strip()                    # remove any spaces
     df.columns = df.columns.str.replace(' ', '_')          # spaces → underscores
-    df.columns = df.columns.str.lower()                    # all lowercase
-    
+    #df.columns = df.columns.str.lower()                    # all lowercase
+
     # Force exact column names we need
     column_mapping = {
         'last_updated': 'last_updated',
@@ -408,8 +421,8 @@ def main():
     df = df.rename(columns=column_mapping)
     
     # Ensure these columns exist (create if missing)
-    for col in ['symbol', 'company_name', 'sector', 'industry', 'current_price', 'week_high_52', 
-                'week_low_52', 'dist_to_high_pct', 'dist_to_low_pct', 'last_updated']:
+    for col in ['symbol', 'company_name', 'sector', 'industry', 'current_price',  'Turnover', 'averagerTurnover' ,'TurnoverRatio', 'week_high_52', 
+                'week_low_52','dist_to_high_pct', 'dist_to_low_pct', 'last_updated']:
         if col not in df.columns:
             df[col] = None  # or appropriate default
 
@@ -419,9 +432,16 @@ def main():
         'sector': st.column_config.TextColumn("Sector", width=1),
         'industry': st.column_config.TextColumn("Industry", width=1),        
         'current_price': st.column_config.NumberColumn("Price", format="$%.2f", width=1),
+        'Turnover': st.column_config.NumberColumn("Turnover", width=1),
+        'averageTurnover': st.column_config.NumberColumn("Average turnover 30 days", width=1),
+        'TurnoverRatio': st.column_config.NumberColumn(
+            "% Vol Ratio", 
+            format="%.2f%%",
+            width=1            
+        ),        
         'week_high_52': st.column_config.NumberColumn("52W High", format="$%.2f", width=1),
         'week_low_52': st.column_config.NumberColumn("52W Low", format="$%.2f", width=1),
-        'dist_to_high_pct': st.column_config.ProgressColumn(
+        'dist_to_high_pct': st.column_config.NumberColumn(
             "% from High",
             help="Distance to 52-week high as percentage",
             format="%.2f%%",
@@ -429,7 +449,7 @@ def main():
             max_value=100,
             width=5
         ),
-        'dist_to_low_pct': st.column_config.ProgressColumn(
+        'dist_to_low_pct': st.column_config.NumberColumn(
             "% from Low",
             help="Distance to 52-week low as percentage",
             format="%.2f%%",
@@ -501,9 +521,8 @@ def main():
                 st.rerun()
         else:
             watch_df = df[df['symbol'].str.upper().isin(valid_symbols)].copy()
-
             # Ensure all required columns exist
-            required_cols = ["symbol",  "sector", "industry", "current_price", 
+            required_cols = ["symbol",  "sector", "industry", "current_price", "Turnover", "averageTurnover", "TurnoverRatio",
                             "dist_to_high_pct", "dist_to_low_pct","company_name"]
             for col in required_cols:
                 if col not in watch_df.columns:
@@ -513,7 +532,7 @@ def main():
             watch_df = watch_df.sort_values("dist_to_high_pct", ascending=True)
 
             # Final display columns
-            display_cols = ["symbol",  "sector", "industry", "current_price",
+            display_cols = ["symbol",  "sector", "industry", "current_price", "Turnover", "averageTurnover","TurnoverRatio",
                             "dist_to_high_pct", "dist_to_low_pct", "company_name"]
 
             st.dataframe(
@@ -524,6 +543,15 @@ def main():
                     "sector": st.column_config.TextColumn("Sector", width="small"),
                     "industry": st.column_config.TextColumn("Industry", width="small"),
                     "current_price": st.column_config.NumberColumn("Price", format="$%.2f"),
+                    "Turnover": st.column_config.NumberColumn(
+                        "Turnover",
+                        width="small"
+                    ),
+                    "averageTurnover": st.column_config.NumberColumn(
+                        "Average turnover",
+                        width="small"
+                    ),
+                    "TurnoverRatio": st.column_config.NumberColumn("% Vol Ratio", format="%.2f%%"),
                     "dist_to_high_pct": st.column_config.NumberColumn("% from High", format="%.1f%%"),
                     "dist_to_low_pct": st.column_config.NumberColumn("% from Low", format="%.1f%%"),
                     "company_name": st.column_config.TextColumn("Name"),
@@ -564,7 +592,7 @@ def main():
             if not close_to_high.empty:
                 st.subheader(f"{cap} Stocks Close to 52-Week High ({latest_time})")
                 st.subheader(f"(≤ {threshold}%)")
-                display_columns = ['symbol', 'sector','industry', 'current_price', 'week_high_52', 'dist_to_high_pct', 'company_name']
+                display_columns = ['symbol', 'sector','industry', 'current_price', 'Turnover', 'averageTurnover', 'TurnoverRatio','week_high_52', 'dist_to_high_pct', 'company_name']
                 selected_row = st.dataframe(
                     close_to_high[display_columns],
                     column_config={k: v for k, v in column_config.items() if k in display_columns},
@@ -581,7 +609,7 @@ def main():
             if not close_to_low.empty:
                 st.subheader(f"{cap} Stocks Close to 52-Week Low ({latest_time})")
                 st.subheader(f"(≤ {threshold}%)")
-                display_columns = ['symbol', 'sector', 'industry', 'current_price', 'week_low_52', 'dist_to_low_pct', 'company_name']
+                display_columns = ['symbol', 'sector', 'industry', 'current_price', 'Turnover', 'averageTurnover', 'TurnoverRatio','week_low_52', 'dist_to_low_pct', 'company_name']
                 selected_row = st.dataframe(
                     close_to_low[display_columns],
                     column_config={k: v for k, v in column_config.items() if k in display_columns},
@@ -598,7 +626,7 @@ def main():
             if not close_to_high.empty:
                 st.subheader(f"{cap} Stocks Close to 52-Week High ({latest_time})")
                 st.subheader(f"(≤ {threshold}%)")
-                display_columns = ['symbol', 'sector', 'industry', 'current_price', 'week_high_52', 'dist_to_high_pct', 'company_name']
+                display_columns = ['symbol', 'sector', 'industry', 'current_price',  'Turnover', 'averageTurnover', 'TurnoverRatio','week_high_52', 'dist_to_high_pct', 'company_name']
                 selected_row = st.dataframe(
                     close_to_high[display_columns],
                     column_config={k: v for k, v in column_config.items() if k in display_columns},
@@ -612,7 +640,7 @@ def main():
             if not close_to_low.empty:
                 st.subheader(f"{cap} Stocks Close to 52-Week Low ({latest_time})")
                 st.subheader(f"(≤ {threshold}%)")
-                display_columns = ['symbol', 'sector', 'industry', 'current_price', 'week_low_52', 'dist_to_low_pct', 'company_name']
+                display_columns = ['symbol', 'sector', 'industry', 'current_price',  'Turnover', 'averageTurnover','TurnoverRatio', 'week_low_52', 'dist_to_low_pct', 'company_name']
                 selected_row = st.dataframe(
                     close_to_low[display_columns],
                     column_config={k: v for k, v in column_config.items() if k in display_columns},
