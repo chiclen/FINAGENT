@@ -13,6 +13,8 @@ from tqdm import tqdm  # For progress bars
 from pathlib import Path
 import numpy as np  # For np.isnan
 import json
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=UserWarning)
 
 api_key = os.environ.get('API_KEY')
 
