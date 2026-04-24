@@ -1,3 +1,5 @@
+from email.utils import quote
+
 import requests
 from yahooquery import Ticker
 #import yfinance as yf
@@ -40,7 +42,11 @@ def init_db():
             week_low_52 REAL, 
             Turnover REAL, 
             averageTurnover REAL, 
-            averageTurnover10Day REAL 
+            averageTurnover10Day REAL, 
+            sma_50 REAL,
+            sma_200 REAL, 
+            dist_from_low REAL,
+            volume_ratio REAL
         )
     ''')
 
@@ -200,7 +206,7 @@ def fetch_price_data(symbols, all_stocks,warning_log, new_record):
     error_count = 0
 
     # Split symbols into smaller batches
-    batch_size = 500
+    batch_size = 200  # Adjust based on testing and API limits
     symbol_batches = [symbols[i:i + batch_size] for i in range(0, len(symbols), batch_size)]
 
     print(f"[{datetime.now()}] Processing {len(symbols)} symbols in {len(symbol_batches)} batches...")
@@ -211,16 +217,24 @@ def fetch_price_data(symbols, all_stocks,warning_log, new_record):
             quote = tickers.price           
             summary_detail = tickers.summary_detail
             profile_data = tickers.asset_profile
+
+            # Fetch history to calculate SMAs (1 year covers 200-day SMA)
+            history = tickers.history(period="1y", interval="1d")
+
             # Process each symbol in the batch
             for symbol in tqdm(batch, desc=f"Processing batch {batch_idx + 1}", unit="stock"):
                 try:
-                    # Get metadata              
+                    # Get metadata
+                    asset_profile = profile_data.get(symbol, {})         
                     if isinstance(profile_data[symbol], str): 
                         sector = ''
                         industry = ''
                     else:
                         sector = profile_data[symbol].get('sector','')
                         industry = profile_data[symbol].get('industry','')
+
+                    # Prices and 52W Data
+                    sd = summary_detail.get(symbol, {})                       
                     #market cap
                     market_cap_raw = summary_detail[symbol].get('marketCap', '')  
                     market_cap = safe_float(market_cap_raw, default=None)
@@ -232,6 +246,33 @@ def fetch_price_data(symbols, all_stocks,warning_log, new_record):
                             skipped_count += 1
                             print(f"[{datetime.now()}] Skipped {symbol}: category {category} not in {desired_categories}")
                             continue
+
+                    week_high_52 = sd.get('fiftyTwoWeekHigh', 0) or 0
+                    week_low_52 = sd.get('fiftyTwoWeekLow', 0) or 0  
+                    current_price = quote.get(symbol, {}).get('regularMarketPrice', 0) or 0                   
+
+                    # --- RISING TRACK CALCULATIONS ---
+                    
+                    # 1. Recovery from Low (Rising Track Indicator)
+                    dist_from_low = 0
+                    if week_low_52 > 0:
+                        dist_from_low = round(((current_price - week_low_52) / week_low_52) * 100, 2)
+
+                    # 2. Moving Averages from History
+                    sma_50 = 0
+                    sma_200 = 0
+                    if history is not None and symbol in history.index:
+                        symbol_hist = history.loc[symbol]
+                        if len(symbol_hist) >= 50:
+                            sma_50 = round(symbol_hist['close'].tail(50).mean(), 2)
+                        if len(symbol_hist) >= 200:
+                            sma_200 = round(symbol_hist['close'].tail(200).mean(), 2)
+
+                    # 3. Volume Ratio (Conviction)
+                    avg_vol_10d = sd.get('averageVolume10days', 0) or 1 # Avoid division by zero
+                    current_vol = quote.get(symbol, {}).get('regularMarketVolume', 0) or 0
+                    volume_ratio = round(current_vol / avg_vol_10d, 2)
+
                     previousclose_raw = summary_detail[symbol].get('previousClose', '')
                     yesterday_close = safe_float(previousclose_raw, default=0.0, strip_dollar=True)
                     if yesterday_close != 0.0:  # Only round if not default
@@ -301,7 +342,11 @@ def fetch_price_data(symbols, all_stocks,warning_log, new_record):
                         'week_low_52': week_low_52,
                         'Turnover': Turnover, 
                         'averageTurnover': averageTurnover, 
-                        'averageTurnover10Day': averageTurnover10Day 
+                        'averageTurnover10Day': averageTurnover10Day,
+                        'sma_50': sma_50,
+                        'sma_200': sma_200,
+                        'dist_from_low': dist_from_low,
+                        'volume_ratio': volume_ratio                      
                     })
                     #print(f"{symbol} , {company_name} , {type})")
                 except Exception as e:
@@ -339,12 +384,16 @@ def fetch_price_data(symbols, all_stocks,warning_log, new_record):
                     week_low_52 REAL, 
                     Turnover REAL, 
                     averageTurnover REAL, 
-                    averageTurnover10Day REAL
+                    averageTurnover10Day REAL,             
+                    sma_50 REAL,
+                    sma_200 REAL, 
+                    dist_from_low REAL,
+                    volume_ratio  REAL
                 )
             ''')
             c.executemany('''
-                INSERT OR REPLACE INTO stocks (symbol, sector, industry, company_name, category, type, last_updated, current_price, yesterday_close, week_high_52, week_low_52, Turnover, averageTurnover, averageTurnover10Day)
-                VALUES (:symbol, :sector, :industry, :company_name, :category, :type, :last_updated, :current_price, :yesterday_close, :week_high_52, :week_low_52, :Turnover, :averageTurnover, :averageTurnover10Day)
+                INSERT OR REPLACE INTO stocks (symbol, sector, industry, company_name, category, type, last_updated, current_price, yesterday_close, week_high_52, week_low_52, Turnover, averageTurnover, averageTurnover10Day, sma_50, sma_200, dist_from_low, volume_ratio)
+                VALUES (:symbol, :sector, :industry, :company_name, :category, :type, :last_updated, :current_price, :yesterday_close, :week_high_52, :week_low_52, :Turnover, :averageTurnover, :averageTurnover10Day, :sma_50, :sma_200, :dist_from_low, :volume_ratio)
             ''', stock_data)
             conn.commit()
             print(f"[{datetime.now()}] Successfully inserted {len(stock_data)} records into stocks.db")
