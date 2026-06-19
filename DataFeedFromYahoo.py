@@ -13,8 +13,6 @@ from tqdm import tqdm  # For progress bars
 from pathlib import Path
 import numpy as np  # For np.isnan
 import json
-warnings.filterwarnings('ignore', category=FutureWarning)
-warnings.filterwarnings('ignore', category=UserWarning)
 
 api_key = os.environ.get('API_KEY')
 
@@ -44,7 +42,10 @@ def init_db():
             week_low_52 REAL, 
             Turnover REAL, 
             averageTurnover REAL, 
-            averageTurnover10Day REAL, 
+            averageTurnover10Day REAL,
+            sma_5 REAL, 
+            sma_10 REAL, 
+            sma_20 REAL,
             sma_50 REAL,
             sma_200 REAL, 
             dist_from_low REAL,
@@ -200,143 +201,177 @@ def safe_float(value, default=None, strip_dollar=False):
     except ValueError:
         return default
     
-def fetch_price_data(symbols, all_stocks,warning_log, new_record):
+def fetch_price_data(symbols, all_stocks, warning_log, new_record):
     desired_categories = ["Mega-Cap", "Large-Cap", "Mid-Cap", "Small-Cap or Below"]
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     stock_data = []  # Store all data in memory
     skipped_count = 0
     error_count = 0
 
+    # --- NEW OPTIMIZATION: Cache existing static data from DB if same trading day ---
+    existing_static_data = {}
+    if not new_record:
+        try:
+            conn = sqlite3.connect('stocks.db')
+            c = conn.cursor()
+            c.execute("SELECT symbol, sector, industry, company_name, category, type FROM stocks")
+            for row in c.fetchall():
+                existing_static_data[row[0].upper()] = {
+                    'sector': row[1],
+                    'industry': row[2],
+                    'company_name': row[3],
+                    'category': row[4],
+                    'type': row[5]
+                }
+            conn.close()
+            print(f"[{datetime.now()}] Cached static data for {len(existing_static_data)} stocks from database.")
+        except Exception as e:
+            print(f"[{datetime.now()}] Error reading static cache: {e}")
+
     # Split symbols into smaller batches
-    batch_size = 200  # Adjust based on testing and API limits
+    batch_size = 200  
     symbol_batches = [symbols[i:i + batch_size] for i in range(0, len(symbols), batch_size)]
 
     print(f"[{datetime.now()}] Processing {len(symbols)} symbols in {len(symbol_batches)} batches...")
     for batch_idx, batch in enumerate(symbol_batches):
         print(f"[{datetime.now()}] Fetching data for batch {batch_idx + 1}/{len(symbol_batches)} ({len(batch)} symbols)...")
         try:
-            tickers = Ticker(batch, asynchronous=True)
+            tickers = Ticker(batch, asynchronous=True, max_workers=60)
             quote = tickers.price           
             summary_detail = tickers.summary_detail
-            profile_data = tickers.asset_profile
+            
+            # --- NEW OPTIMIZATION: Bypassing profile data fetch if it exists in cache ---
+            # Only fetch profile data for symbols not already cached in our DB
+            uncached_batch = [s for s in batch if s.upper() not in existing_static_data]
+            if uncached_batch and new_record:
+                profile_tickers = Ticker(uncached_batch, asynchronous=True, max_workers=60)
+                profile_data = profile_tickers.asset_profile
+            else:
+                profile_data = {}
 
-            # Fetch history to calculate SMAs (1 year covers 200-day SMA)
+            # Fetch history. 1y covers 200-day SMA. 
             history = tickers.history(period="1y", interval="1d")
 
             # Process each symbol in the batch
             for symbol in tqdm(batch, desc=f"Processing batch {batch_idx + 1}", unit="stock"):
+                sym_upper = symbol.upper()
                 try:
-                    # Get metadata
-                    asset_profile = profile_data.get(symbol, {})         
-                    if isinstance(profile_data[symbol], str): 
-                        sector = ''
-                        industry = ''
-                    else:
-                        sector = profile_data[symbol].get('sector','')
-                        industry = profile_data[symbol].get('industry','')
+                    # Check if quote or summary data exists for the symbol
+                    symbol_quote = quote.get(symbol, {})
+                    sd = summary_detail.get(symbol, {})  
+                    
+                    if isinstance(symbol_quote, str) or not symbol_quote:
+                        continue  # Skip error responses or missing quotes
+                    
+                    current_price = symbol_quote.get('regularMarketPrice', 0) or 0                   
+                    previousclose_raw = sd.get('previousClose', '')
+                    yesterday_close = safe_float(previousclose_raw, default=0.0, strip_dollar=True)
 
-                    # Prices and 52W Data
-                    sd = summary_detail.get(symbol, {})                       
-                    #market cap
-                    market_cap_raw = summary_detail[symbol].get('marketCap', '')  
-                    market_cap = safe_float(market_cap_raw, default=None)
-                    if market_cap is not None:
-                        market_cap = round(market_cap, 2)
-                        category = categorize_market_cap(market_cap)
-                        # Skip if category is not desired
-                        if category not in desired_categories:
-                            skipped_count += 1
-                            print(f"[{datetime.now()}] Skipped {symbol}: category {category} not in {desired_categories}")
+                    # SANITY GATEKEEPER
+                    if current_price <= 0:
+                        continue
+                    if yesterday_close > 0:
+                        price_change_pct = abs(current_price - yesterday_close) / yesterday_close
+                        if price_change_pct > 0.90:
+                            warning_log.append(f"Skipped {symbol}: Anomalous price jump from {yesterday_close} to {current_price}")
                             continue
 
-                    week_high_52 = sd.get('fiftyTwoWeekHigh', 0) or 0
-                    week_low_52 = sd.get('fiftyTwoWeekLow', 0) or 0  
-                    current_price = quote.get(symbol, {}).get('regularMarketPrice', 0) or 0                   
+                    # --- CONDITIONAL STATIC DATA LOADING ---
+                    if sym_upper in existing_static_data:
+                        # Grab static data from local cache instead of API parser variables
+                        sector = existing_static_data[sym_upper]['sector']
+                        industry = existing_static_data[sym_upper]['industry']
+                        company_name = existing_static_data[sym_upper]['company_name']
+                        category = existing_static_data[sym_upper]['category']
+                        type_str = existing_static_data[sym_upper]['type']
+                    else:
+                        # Fetch and parse manually if missing
+                        if isinstance(profile_data.get(symbol), str) or symbol not in profile_data: 
+                            sector = ''
+                            industry = ''
+                        else:
+                            sector = profile_data[symbol].get('sector', '')
+                            industry = profile_data[symbol].get('industry', '')
 
-                    # --- RISING TRACK CALCULATIONS ---
-                    
-                    # 1. Recovery from Low (Rising Track Indicator)
-                    dist_from_low = 0
-                    if week_low_52 > 0:
-                        dist_from_low = round(((current_price - week_low_52) / week_low_52) * 100, 2)
+                        market_cap_raw = sd.get('marketCap', '')  
+                        market_cap = safe_float(market_cap_raw, default=None)
+                        if market_cap is not None:
+                            market_cap = round(market_cap, 2)
+                            category = categorize_market_cap(market_cap)
+                        else:
+                            category = "Unknown"
+                        
+                        type_str = symbol_quote.get('quoteType', '')
+                        company_name = symbol_quote.get('shortName', '')
 
-                    # 2. Moving Averages from History
-                    sma_50 = 0
-                    sma_200 = 0
-                    if history is not None and symbol in history.index:
-                        symbol_hist = history.loc[symbol]
+                    # Skip processing if we know the category isn't something we want
+                    if category not in desired_categories:
+                        skipped_count += 1
+                        continue
+
+                    # 52-Week High / Low Validation
+                    week_high_52 = safe_float(sd.get('fiftyTwoWeekHigh', 0.0), default=0.0)
+                    week_low_52 = safe_float(sd.get('fiftyTwoWeekLow', 0.0), default=0.0)
+                    if week_high_52 <= 0 or week_low_52 <= 0:
+                        continue 
+
+                    # Recovery from Low (Rising Track Indicator)
+                    dist_from_low = round(((current_price - week_low_52) / week_low_52) * 100, 2)
+
+                    # ROBUST MULTI-INDEX & INTRADAY SMA ALIGNMENT
+                    sma_5 = sma_10 = sma_20 = sma_50 = sma_200 = 0
+                    symbol_hist = None
+
+                    if history is not None and not history.empty:
+                        try:
+                            if isinstance(history.index, pd.MultiIndex):
+                                if symbol in history.index.levels[0]:
+                                    symbol_hist = history.loc[symbol].copy()
+                            else:
+                                symbol_hist = history.copy()
+                        except KeyError:
+                            symbol_hist = None
+
+                    if symbol_hist is not None and not symbol_hist.empty:
+                        close_col = 'adjclose' if 'adjclose' in symbol_hist.columns else 'close'
+                        
+                        last_hist_date = str(symbol_hist.index[-1])[:10]
+                        today_date = date.today().strftime('%Y-%m-%d')
+                        
+                        if last_hist_date != today_date:
+                            new_row = pd.DataFrame({close_col: [current_price]}, index=[pd.to_datetime(today_date)])
+                            symbol_hist = pd.concat([symbol_hist, new_row])
+
+                        if len(symbol_hist) >= 5:
+                            sma_5 = round(symbol_hist[close_col].tail(5).mean(), 2)
+                        if len(symbol_hist) >= 10:
+                            sma_10 = round(symbol_hist[close_col].tail(10).mean(), 2)
+                        if len(symbol_hist) >= 20:
+                            sma_20 = round(symbol_hist[close_col].tail(20).mean(), 2)
                         if len(symbol_hist) >= 50:
-                            sma_50 = round(symbol_hist['close'].tail(50).mean(), 2)
+                            sma_50 = round(symbol_hist[close_col].tail(50).mean(), 2)
                         if len(symbol_hist) >= 200:
-                            sma_200 = round(symbol_hist['close'].tail(200).mean(), 2)
+                            sma_200 = round(symbol_hist[close_col].tail(200).mean(), 2)
 
-                    # 3. Volume Ratio (Conviction)
-                    avg_vol_10d = sd.get('averageVolume10days', 0) or 1 # Avoid division by zero
-                    current_vol = quote.get(symbol, {}).get('regularMarketVolume', 0) or 0
+                    # Volume Data Validation
+                    avg_vol_10d = safe_float(sd.get('averageVolume10days', 0), default=1.0)
+                    if avg_vol_10d <= 0: avg_vol_10d = 1.0 
+                    
+                    current_vol = safe_float(symbol_quote.get('regularMarketVolume', 0), default=0.0)
                     volume_ratio = round(current_vol / avg_vol_10d, 2)
 
-                    previousclose_raw = summary_detail[symbol].get('previousClose', '')
-                    yesterday_close = safe_float(previousclose_raw, default=0.0, strip_dollar=True)
-                    if yesterday_close != 0.0:  # Only round if not default
-                        yesterday_close = round(yesterday_close, 2)
+                    averageTurnover = safe_float(sd.get('averageVolume', 0.0), default=0.0)
+                    averageTurnover10Day = avg_vol_10d if avg_vol_10d != 1.0 else 0.0
+                    Turnover = current_vol
 
-                    #52 weeks high
-                    week_high_52 = summary_detail[symbol].get('fiftyTwoWeekHigh',0) 
-                    if week_high_52 is None or (isinstance(week_high_52, float) and np.isnan(week_high_52)):
-                            week_high_52 = 0.0
-                    else:
-                        week_high_52 = float(week_high_52)
-                    # 52 weeks low
-                    week_low_52 = summary_detail[symbol].get('fiftyTwoWeekLow', 0)
-                    if week_low_52 is None or (isinstance(week_low_52, float) and np.isnan(week_low_52)):
-                        week_low_52 = 0.0
-                    else:
-                        week_low_52 = float(week_low_52)
-                    # Volume 
-                    #regularMarketTurnover = summary_detail[symbol].get('regularMarketVolume', 0)
-                    averageTurnover = summary_detail[symbol].get('averageVolume', 0)
-                    if averageTurnover is None or (isinstance(averageTurnover, float) and np.isnan(averageTurnover)):
-                            averageTurnover = 0.0
-                    else:
-                        averageTurnover = float(averageTurnover)
-
-                    averageTurnover10Day = summary_detail[symbol].get('averageVolume10days', 0)
-                    if averageTurnover10Day is None or (isinstance(averageTurnover10Day, float) and np.isnan(averageTurnover10Day)):
-                            averageTurnover10Day = 0.0
-                    else:
-                        averageTurnover10Day = float(averageTurnover10Day)
-
-
-                    # market price
-                    symbol_quote = quote.get(symbol, {})
-                    # Check if quote is an error response
-                    if  isinstance(symbol_quote , str):
-                        continue
-                    # turnover
-                    Turnover = symbol_quote.get('regularMarketVolume', 0) 
-                    if Turnover is None or (isinstance(Turnover, float) and np.isnan(Turnover)):
-                            Turnover = 0.0
-                    else:
-                        Turnover = float(Turnover)
-
-                    current_price = symbol_quote.get('regularMarketPrice', 0) 
-                    if current_price is None or (isinstance(current_price, float) and np.isnan(current_price)):
-                            current_price = 0.0
-                    else:
-                        current_price = float(current_price)
-                    
-                    type = symbol_quote.get('quoteType','')
-                    # 
-                    #company_name = all_stocks[j].get('name', '')
-                    company_name=symbol_quote.get('shortName', '')
-                    # Store data in memory
+                    # Store clean data package
                     stock_data.append({
-                        'symbol': symbol.upper(),
+                        'symbol': sym_upper,
                         'sector': sector,
                         'industry': industry,
                         'company_name': company_name,
                         'category': category,
-                        'type':type,
+                        'type': type_str,
                         'last_updated': timestamp,
                         'current_price': float(current_price),
                         'yesterday_close': yesterday_close,
@@ -345,70 +380,77 @@ def fetch_price_data(symbols, all_stocks,warning_log, new_record):
                         'Turnover': Turnover, 
                         'averageTurnover': averageTurnover, 
                         'averageTurnover10Day': averageTurnover10Day,
+                        'sma_5': sma_5,                         
+                        'sma_10': sma_10,
+                        'sma_20': sma_20,
                         'sma_50': sma_50,
                         'sma_200': sma_200,
                         'dist_from_low': dist_from_low,
                         'volume_ratio': volume_ratio                      
                     })
-                    #print(f"{symbol} , {company_name} , {type})")
                 except Exception as e:
                     error_count += 1
                     warning_log.append(f"Error processing {symbol} in batch {batch_idx + 1}: {str(e)}")
-                    print(f"[{datetime.now()}] Error processing {symbol}: {str(e)}")
-                    time.sleep(1)  # Avoid rate limits
 
-            # Pause between batches
-            time.sleep(1)
+            time.sleep(1)  
         except Exception as e:
             error_count += len(batch)
             warning_log.append(f"Error fetching yahooquery data for batch {batch_idx + 1}: {str(e)}")
-            print(f"[{datetime.now()}] Error fetching yahooquery data for batch {batch_idx + 1}: {str(e)}")
-            time.sleep(5)  # Longer pause for batch errors
+            time.sleep(5)  
 
-    # Write to database in one batch
+    # Write or update database
     if stock_data:
         try:
             conn = sqlite3.connect('stocks.db')
             c = conn.cursor()
-            print(f"[{datetime.now()}] Writing {len(stock_data)} records to stocks.db...")
+            
+            # Ensure table structure exists
             c.execute('''
                 CREATE TABLE IF NOT EXISTS stocks (
-                    symbol TEXT PRIMARY KEY,
-                    sector TEXT, 
-                    industry TEXT,
-                    company_name TEXT,
-                    category TEXT,
-                    type TEXT,
-                    last_updated TEXT,
-                    current_price REAL,
-                    yesterday_close REAL,
-                    week_high_52 REAL,
-                    week_low_52 REAL, 
-                    Turnover REAL, 
-                    averageTurnover REAL, 
-                    averageTurnover10Day REAL,             
-                    sma_50 REAL,
-                    sma_200 REAL, 
-                    dist_from_low REAL,
-                    volume_ratio  REAL
+                    symbol TEXT PRIMARY KEY, sector TEXT, industry TEXT, company_name TEXT, category TEXT, type TEXT,
+                    last_updated TEXT, current_price REAL, yesterday_close REAL, week_high_52 REAL, week_low_52 REAL, 
+                    Turnover REAL, averageTurnover REAL, averageTurnover10Day REAL,            
+                    sma_5 REAL, sma_10 REAL, sma_20 REAL, sma_50 REAL, sma_200 REAL, dist_from_low REAL, volume_ratio REAL
                 )
             ''')
-            c.executemany('''
-                INSERT OR REPLACE INTO stocks (symbol, sector, industry, company_name, category, type, last_updated, current_price, yesterday_close, week_high_52, week_low_52, Turnover, averageTurnover, averageTurnover10Day, sma_50, sma_200, dist_from_low, volume_ratio)
-                VALUES (:symbol, :sector, :industry, :company_name, :category, :type, :last_updated, :current_price, :yesterday_close, :week_high_52, :week_low_52, :Turnover, :averageTurnover, :averageTurnover10Day, :sma_50, :sma_200, :dist_from_low, :volume_ratio)
-            ''', stock_data)
+
+            if new_record:
+                # First run of the day: Use normal INSERT OR REPLACE
+                print(f"[{datetime.now()}] First run detected. Inserting {len(stock_data)} records...")
+                c.executemany('''
+                    INSERT OR REPLACE INTO stocks (symbol, sector, industry, company_name, category, type, last_updated, current_price, yesterday_close, week_high_52, week_low_52, Turnover, averageTurnover, averageTurnover10Day, sma_5, sma_10, sma_20, sma_50, sma_200, dist_from_low, volume_ratio)
+                    VALUES (:symbol, :sector, :industry, :company_name, :category, :type, :last_updated, :current_price, :yesterday_close, :week_high_52, :week_low_52, :Turnover, :averageTurnover, :averageTurnover10Day, :sma_5, :sma_10, :sma_20, :sma_50, :sma_200, :dist_from_low, :volume_ratio)
+                ''', stock_data)
+            else:
+                # Subsequent intraday runs: Only UPDATE the dynamic metrics to maximize performance
+                print(f"[{datetime.now()}] Same-day rerun detected. Executing dynamic-only updates...")
+                c.executemany('''
+                    UPDATE stocks SET 
+                        last_updated = :last_updated,
+                        current_price = :current_price,
+                        yesterday_close = :yesterday_close,
+                        week_high_52 = :week_high_52,
+                        week_low_52 = :week_low_52,
+                        Turnover = :Turnover,
+                        averageTurnover = :averageTurnover,
+                        averageTurnover10Day = :averageTurnover10Day,
+                        sma_5 = :sma_5,
+                        sma_10 = :sma_10,
+                        sma_20 = :sma_20,
+                        sma_50 = :sma_50,
+                        sma_200 = :sma_200,
+                        dist_from_low = :dist_from_low,
+                        volume_ratio = :volume_ratio
+                    WHERE symbol = :symbol
+                ''', stock_data)
+
             conn.commit()
-            print(f"[{datetime.now()}] Successfully inserted {len(stock_data)} records into stocks.db")
+            print(f"[{datetime.now()}] Successfully processed database changes.")
         except sqlite3.Error as e:
-            warning_log.append(f"SQLite error during batch insert: {str(e)}")
-            print(f"[{datetime.now()}] SQLite error during batch insert: {str(e)}")
+            warning_log.append(f"SQLite error during batch update: {str(e)}")
         finally:
             conn.close()
-    else:
-        print(f"[{datetime.now()}] No valid stock data to insert into database")
-
-    # Summary
-    print(f"[{datetime.now()}] Summary: {len(stock_data)} valid stocks inserted, {skipped_count} skipped, {error_count} errors")
+    
     return stock_data, skipped_count, error_count
 
 def get_current_trading_date():
@@ -452,7 +494,6 @@ def main():
 
     # Step 2 & 3: Fetch price data and store in database
     print(f"[{datetime.now()}] Fetching and storing price data from Yahoo Finance...")
-    #get_stock_info(symbols, all_stocks, warning_log, new_record)
     fetch_price_data(symbols, all_stocks, warning_log, new_record)
     print(f"[{datetime.now()}] Update complete!")
     end_time = time.time()
