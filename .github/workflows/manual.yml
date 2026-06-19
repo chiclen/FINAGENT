@@ -2,9 +2,14 @@ name: Run DataFeedFromYahoo
 
 on:
   schedule:
-    - cron: '30 13 * * *'  # 13:30 GMT
-    - cron: '30 14 * * *'  # 14:30 GMT
-    - cron: '0 16 * * *'   # 16:00 GMT
+    # 1. Runs every 15 minutes from 13:30 UTC to 20:15 UTC, Monday through Friday.
+    # This perfectly covers 9:30 AM to 4:15 PM EST (Live US Market Hours).
+    - cron: '30/15 13 * * 1-5'
+    - cron: '*/15 14-19 * * 1-5'
+    - cron: '0,15 20 * * 1-5'
+    
+    # 2. Runs once at 13:00 UTC (9:00 AM EST) for pre-market database initialization.
+    - cron: '0 13 * * 1-5'
   workflow_dispatch:      # Allows manual triggering
 
 jobs:
