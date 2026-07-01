@@ -16,8 +16,10 @@ import json
 
 api_key = os.environ.get('API_KEY')
 
+
 # Suppress warnings
 warnings.filterwarnings('ignore', category=UserWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
 
 # Function to initialize SQLite database with indexes
 def init_db():
@@ -229,14 +231,14 @@ def fetch_price_data(symbols, all_stocks, warning_log, new_record):
             print(f"[{datetime.now()}] Error reading static cache: {e}")
 
     # Split symbols into smaller batches
-    batch_size = 200  
+    batch_size = 50  
     symbol_batches = [symbols[i:i + batch_size] for i in range(0, len(symbols), batch_size)]
 
     print(f"[{datetime.now()}] Processing {len(symbols)} symbols in {len(symbol_batches)} batches...")
     for batch_idx, batch in enumerate(symbol_batches):
         print(f"[{datetime.now()}] Fetching data for batch {batch_idx + 1}/{len(symbol_batches)} ({len(batch)} symbols)...")
         try:
-            tickers = Ticker(batch, asynchronous=True, max_workers=60)
+            tickers = Ticker(batch, asynchronous=True, max_workers=5)
             quote = tickers.price           
             summary_detail = tickers.summary_detail
             
@@ -392,7 +394,7 @@ def fetch_price_data(symbols, all_stocks, warning_log, new_record):
                     error_count += 1
                     warning_log.append(f"Error processing {symbol} in batch {batch_idx + 1}: {str(e)}")
 
-            time.sleep(1)  
+            time.sleep(3)  
         except Exception as e:
             error_count += len(batch)
             warning_log.append(f"Error fetching yahooquery data for batch {batch_idx + 1}: {str(e)}")
@@ -502,6 +504,7 @@ def main():
     print(f"[{datetime.now()}] Warning log: {warning_log}")
 
     # Push to GitHub
+    '''
     print(f"[{datetime.now()}] Pushing stocks.db to GitHub...")
     os.system("git add stocks.db")
     os.system(f'git commit -m "Update stocks.db at {datetime.now()}"')
@@ -510,6 +513,7 @@ def main():
         print(f"[{datetime.now()}] Successfully pushed stocks.db to GitHub")
     else:
         print(f"[{datetime.now()}] Failed to push stocks.db to GitHub, exit code: {push_result}")
+    '''
 
 if __name__ == "__main__":
     main()
