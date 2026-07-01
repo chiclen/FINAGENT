@@ -231,14 +231,14 @@ def fetch_price_data(symbols, all_stocks, warning_log, new_record):
             print(f"[{datetime.now()}] Error reading static cache: {e}")
 
     # Split symbols into smaller batches
-    batch_size = 100  
+    batch_size = 50  
     symbol_batches = [symbols[i:i + batch_size] for i in range(0, len(symbols), batch_size)]
 
     print(f"[{datetime.now()}] Processing {len(symbols)} symbols in {len(symbol_batches)} batches...")
     for batch_idx, batch in enumerate(symbol_batches):
         print(f"[{datetime.now()}] Fetching data for batch {batch_idx + 1}/{len(symbol_batches)} ({len(batch)} symbols)...")
         try:
-            tickers = Ticker(batch, asynchronous=True, max_workers=60)
+            tickers = Ticker(batch, asynchronous=True, max_workers=5)
             quote = tickers.price           
             summary_detail = tickers.summary_detail
             
@@ -246,7 +246,7 @@ def fetch_price_data(symbols, all_stocks, warning_log, new_record):
             # Only fetch profile data for symbols not already cached in our DB
             uncached_batch = [s for s in batch if s.upper() not in existing_static_data]
             if uncached_batch and new_record:
-                profile_tickers = Ticker(uncached_batch, asynchronous=True, max_workers=60)
+                profile_tickers = Ticker(uncached_batch, asynchronous=True, max_workers=5)
                 profile_data = profile_tickers.asset_profile
             else:
                 profile_data = {}
