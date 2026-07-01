@@ -7,6 +7,10 @@ on:
     - cron: '0 16 * * *'   # 16:00 GMT
   workflow_dispatch:      # Allows manual triggering
 
+# 👇 FIX 1: Grant the workflow permission to push code back to your repo
+permissions:
+  contents: write
+
 jobs:
   run-script:
     runs-on: ubuntu-latest
@@ -41,8 +45,10 @@ jobs:
       run: python DataFeedFromYahoo.py
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # 👇 FIX 3: Pass your API key into the script
+        API_KEY: ${{ secrets.API_KEY }} 
 
-    # Step 6: Upload stocks.db as an artifact
+    # Step 6: Upload stocks.db as an artifact (Great safety net!)
     - name: Upload stocks.db artifact
       uses: actions/upload-artifact@v4
       with:
@@ -55,7 +61,8 @@ jobs:
       run: |
         git add stocks.db
         git commit -m "Update stocks.db at $(date -u)" || echo "No changes to commit"
-        git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/chiclen/FINAGENT.git
+        # 👇 FIX 2: Use dynamic repository variable instead of hardcoded URL
+        git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
         git push origin main || echo "No changes to push or push failed"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
