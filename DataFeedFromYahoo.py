@@ -238,7 +238,7 @@ def fetch_price_data(symbols, all_stocks, warning_log, new_record):
     for batch_idx, batch in enumerate(symbol_batches):
         print(f"[{datetime.now()}] Fetching data for batch {batch_idx + 1}/{len(symbol_batches)} ({len(batch)} symbols)...")
         try:
-            tickers = Ticker(batch, asynchronous=True, max_workers=5)
+            tickers = Ticker(batch, asynchronous=True, max_workers=60)
             quote = tickers.price           
             summary_detail = tickers.summary_detail
             
