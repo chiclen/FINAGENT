@@ -231,7 +231,7 @@ def fetch_price_data(symbols, all_stocks, warning_log, new_record):
             print(f"[{datetime.now()}] Error reading static cache: {e}")
 
     # Split symbols into smaller batches
-    batch_size = 50  
+    batch_size = 100  
     symbol_batches = [symbols[i:i + batch_size] for i in range(0, len(symbols), batch_size)]
 
     print(f"[{datetime.now()}] Processing {len(symbols)} symbols in {len(symbol_batches)} batches...")
